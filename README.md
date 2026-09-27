@@ -56,7 +56,6 @@ At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
 - `goal_src/jak2/engine/target/target-darkjak.gc` — the flight, glide, turbo, landing, wings and sounds
 - `goal_src/jak2/engine/target/{target,logic-target,target-h}.gc` — hooks the flight into Jak's air states
 - `goal_src/jak2/engine/camera/cam-master.gc` — the camera tracks Jak's height while flying
-- `goal_src/jak2/engine/level/region.gc` — city district triggers are tested ahead of a flying Jak
 - `goal_src/jak2/engine/level/level.gc`, `goal_src/jak2/dgos/game.gd`,
   `custom_assets/jak2/levels/test-zone/test-zone.jsonc` — keep both wing models loaded everywhere
 - `goal_src/jak2/engine/ui/progress/…`, `goal_src/jak2/engine/game/game-info-h.gc`,
