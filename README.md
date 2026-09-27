@@ -30,7 +30,7 @@ Both are in the *Secrets* menu, and each save keeps its own choice:
 - **Dark Angel Wings** — off: **Metal Head** wings (Metal Kor's, with his wing-beat and hover sounds;
   the default). On: **Dark Angel** wings (the bat wings of the pegasus that flies through Haven Forest,
   with its sounds). Free, and always in the menu.
-- **Endless Dark Eco** — the game's own item. The mod unlocks it and switches it **on**
+- **Unlimited Dark Jak** — the game's own item (endless dark eco). The mod unlocks it and switches it **on**
   in any save that doesn't have it yet; switch it off there if you'd rather collect dark eco (each
   transformation then costs a full meter, as in the original game — the flight itself stays unlimited).
 
