@@ -8,15 +8,19 @@
 
 #include "game/runtime.h"
 
-static constexpr int N_BANKS = 6;
+// DARK FLIGHT: one extra level bank slot (6 -> 7), so the mod can keep one sound bank (the pegasus
+// wing sounds) loaded everywhere without taking a slot the level system needs. On PC the spu_loc/size
+// values are bookkeeping only -- snd_BankLoadEx ignores them and loads banks into their own memory.
+static constexpr int N_BANKS = 7;
 
 SoundBank gCommonBank;
 SoundBank gGunBank;
 SoundBank gBoardBank;
-SoundBank gLevelBanks[3];
+SoundBank gLevelBanks[4];
 
 SoundBank* gBanks[N_BANKS] = {&gCommonBank,    &gGunBank,       &gBoardBank,
-                              &gLevelBanks[0], &gLevelBanks[1], &gLevelBanks[2]};
+                              &gLevelBanks[0], &gLevelBanks[1], &gLevelBanks[2],
+                              &gLevelBanks[3]};
 
 void sbank_init_globals() {
   gCommonBank = {};
@@ -69,6 +73,11 @@ void InitBanks() {
     strncpy(gBanks[5]->name.data(), "level2", 16);
     gBanks[5]->spu_loc = 0x1B6740;
     gBanks[5]->spu_size = 0x42800;
+
+    // DARK FLIGHT: the extra slot (past the PS2's SPU RAM -- unused on PC, see above)
+    strncpy(gBanks[6]->name.data(), "level3", 16);
+    gBanks[6]->spu_loc = 0x1F8F40;
+    gBanks[6]->spu_size = 0x42800;
   }
 }
 
