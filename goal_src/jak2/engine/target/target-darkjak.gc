@@ -112,8 +112,10 @@
 
 (defbehavior target-darkjak-process target ()
   (local-vars (gp-0 vector))
-  ;; DARK FLIGHT: the wing style is a PC setting (Options > Game Options > Dark Flight)
-  (set! *df-wings-style* (-> *pc-settings* df-wings))
+  ;; DARK FLIGHT: the wing style is a Secrets-menu item, "Dark Angel Wings" (off = Metal Head), so
+  ;; each save keeps its own. It comes bought (free) so it's always in the menu.
+  (logior! (-> *game-info* purchase-secrets) (game-secrets dark-angel-wings))
+  (set! *df-wings-style* (if (logtest? (-> self game secrets) (game-secrets dark-angel-wings)) 'dark-angel 'metal-head))
   (df-sfx-bank) ;; the wing style's sounds, from the player's game files
   ;; DARK FLIGHT: fly as long as you like. The game's own Endless Dark Eco secret comes bought and
   ;; switched ON in any save that doesn't have it yet (new games included); after that it's the
@@ -2970,10 +2972,10 @@
 ;; metalkor-wings-ag is a wings-only art group (Metal Kor is built from separate
 ;; body/legs/torso/wings groups), so it can be strapped to Jak. It normally only
 ;; ships in the nest boss level, so the .go is added to GAME.CGO in dgos/game.gd.
-;; ---- wing style (Options > Game Options > Dark Flight > Wings) ----
+;; ---- wing style (Secrets menu: "Dark Angel Wings", off = Metal Head) ----
 ;;   'metal-head -- Metal Kor's wings (default)
 ;;   'dark-angel -- the Haven Forest pegasus's bat wings
-(define *df-wings-style* 'metal-head)   ;; copied from *pc-settings* every frame
+(define *df-wings-style* 'metal-head)   ;; set from the save's secrets every frame
 (define *dw-spawned-style* 'metal-head) ;; the style the live wings were built with (the option can change)
 ;; Dark Angel: the pegasus is one whole-body model, so its body is shrunk away bone by bone and its
 ;; two wing chains are mounted on Jak's back.

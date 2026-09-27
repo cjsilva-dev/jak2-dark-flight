@@ -541,8 +541,8 @@
     :y-space 30
     :scale 0.82
     :options (new 'static 'boxed-array :type menu-option (new 'static 'menu-secret-option
-                                                  :num-items 16
-                                                  :num-hero-items 16
+                                                  :num-items 17 ;; DARK FLIGHT: +1 (Dark Angel Wings)
+                                                  :num-hero-items 17
                                                   :secret-items (new 'static 'boxed-array :type secret-item-option
                                                     (new 'static 'secret-item-option
                                                       :name (text-id progress-secrets-toggle-beard)
@@ -656,6 +656,14 @@
                                                       :flag (game-secrets endless-dark)
                                                       :avail-after (game-task-node nest-boss-resolution)
                                                       )
+                                                    (new 'static 'secret-item-option ;; DARK FLIGHT
+                                                      :name (text-id progress-secrets-dark-angel-wings)
+                                                      :scale #t
+                                                      :cost 0
+                                                      :can-toggle #t
+                                                      :flag (game-secrets dark-angel-wings)
+                                                      :avail-after (game-task-node nest-boss-resolution)
+                                                      )
                                                     (new 'static 'secret-item-option
                                                       :name (text-id progress-secrets-invulnerable)
                                                       :scale #t
@@ -702,6 +710,14 @@
                                                       :cost 25
                                                       :can-toggle #t
                                                       :flag (game-secrets endless-dark)
+                                                      :avail-after (game-task-node fortress-escape-start)
+                                                      )
+                                                    (new 'static 'secret-item-option ;; DARK FLIGHT
+                                                      :name (text-id progress-secrets-dark-angel-wings)
+                                                      :scale #t
+                                                      :cost 0
+                                                      :can-toggle #t
+                                                      :flag (game-secrets dark-angel-wings)
                                                       :avail-after (game-task-node fortress-escape-start)
                                                       )
                                                     (new 'static 'secret-item-option

@@ -854,10 +854,7 @@
   (pad-x #x2002)
   (pad-square #x2003)
   ;; DARK FLIGHT
-  (progress-dark-flight #x2100)
-  (progress-dark-flight-wings #x2101)
-  (progress-dark-flight-wings-metal-head #x2102)
-  (progress-dark-flight-wings-dark-angel #x2103)
+  (progress-secrets-dark-angel-wings #x2100)
 
   ;; destination names text
   (caspad-name #x10000)

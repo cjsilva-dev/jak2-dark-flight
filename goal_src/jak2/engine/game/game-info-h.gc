@@ -98,7 +98,8 @@
   (hero-mode)
   (big-head)
   (little-head)
-  (game-secret-unknown))
+  (game-secret-unknown)
+  (dark-angel-wings)) ;; DARK FLIGHT: wing style (off = Metal Head)
 ;; ---game-secrets
 
 (defenum game-score

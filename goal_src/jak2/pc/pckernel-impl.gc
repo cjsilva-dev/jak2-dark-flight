@@ -92,7 +92,6 @@
    (fast-elevator? symbol)
    (fast-progress? symbol)
    (minimap-force-north   symbol)
-   (df-wings        symbol) ;; DARK FLIGHT: wing style, 'metal-head or 'dark-angel
 
    (stats   statistics)
 
@@ -152,7 +151,6 @@
   (false! (-> obj fast-progress?))
   (true! (-> obj smooth-minimap?))
   (false! (-> obj minimap-force-north))
-  (set! (-> obj df-wings) 'metal-head) ;; DARK FLIGHT
   (false! (-> obj hires-clouds?))
   (set! (-> obj speedrunner-mode-custom-bind) 0)
 

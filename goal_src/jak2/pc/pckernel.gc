@@ -761,7 +761,6 @@
     (("fast-progress?") (set! (-> obj fast-progress?) (file-stream-read-symbol file)))
     (("smooth-minimap?") (set! (-> obj smooth-minimap?) (file-stream-read-symbol file)))
     (("minimap-force-north") (set! (-> obj minimap-force-north) (file-stream-read-symbol file)))
-    (("df-wings") (set! (-> obj df-wings) (if (= (file-stream-read-symbol file) 'dark-angel) 'dark-angel 'metal-head))) ;; DARK FLIGHT
     (("hires-clouds?") (set! (-> obj hires-clouds?) (file-stream-read-symbol file)))
     (("text-language") (set! (-> obj text-language) (the-as pc-language (file-stream-read-int file))))
     (("subtitle-language") (set! (-> obj subtitle-language) (the-as pc-language (file-stream-read-int file))))
@@ -819,7 +818,6 @@
   (format file "  (fast-progress? ~A)~%" (-> obj fast-progress?))
   (format file "  (smooth-minimap? ~A)~%" (-> obj smooth-minimap?))
   (format file "  (minimap-force-north ~A)~%" (-> obj minimap-force-north))
-  (format file "  (df-wings ~A)~%" (-> obj df-wings)) ;; DARK FLIGHT
   (format file "  (hires-clouds? ~A)~%" (-> obj hires-clouds?))
   (format file "  (text-language ~D)~%" (-> obj text-language))
   (format file "  (subtitle-language ~D)~%" (-> obj subtitle-language))

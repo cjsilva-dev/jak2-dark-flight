@@ -25,10 +25,12 @@ loaded and shown ahead of you as you fly — including over the walls between th
 
 ## Settings
 
-- **Wings** — *Options > Game Options > Dark Flight*:
-  - **Metal Head** (default): Metal Kor's wings, with his wing-beat and hover sounds.
-  - **Dark Angel**: the bat wings of the pegasus that flies through Haven Forest, with its sounds.
-- **Endless Dark Eco** — the game's own *Secrets* menu item. The mod unlocks it and switches it **on**
+Both are in the *Secrets* menu, and each save keeps its own choice:
+
+- **Dark Angel Wings** — off: **Metal Head** wings (Metal Kor's, with his wing-beat and hover sounds;
+  the default). On: **Dark Angel** wings (the bat wings of the pegasus that flies through Haven Forest,
+  with its sounds). Free, and always in the menu.
+- **Endless Dark Eco** — the game's own item. The mod unlocks it and switches it **on**
   in any save that doesn't have it yet; switch it off there if you'd rather collect dark eco (each
   transformation then costs a full meter, as in the original game — the flight itself stays unlimited).
 
@@ -48,8 +50,8 @@ At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
 - `goal_src/jak2/engine/level/region.gc` — city district triggers are tested ahead of a flying Jak
 - `goal_src/jak2/engine/level/level.gc`, `goal_src/jak2/dgos/game.gd`,
   `custom_assets/jak2/levels/test-zone/test-zone.jsonc` — keep both wing models loaded everywhere
-- `goal_src/jak2/pc/…`, `goal_src/jak2/engine/ui/text-id-h.gc`, `game/assets/jak2/text/` — the Dark
-  Flight settings page
+- `goal_src/jak2/engine/ui/progress/…`, `goal_src/jak2/engine/game/game-info-h.gc`,
+  `goal_src/jak2/engine/ui/text-id-h.gc`, `game/assets/jak2/text/` — the Dark Angel Wings secret
 - `game/overlord/common/sbank.cpp` — **engine change:** one extra sound bank slot. Stock *Jak II* can hold
   six sound banks and uses all of them, so there's no room for the wings' sounds; this adds a seventh.
 

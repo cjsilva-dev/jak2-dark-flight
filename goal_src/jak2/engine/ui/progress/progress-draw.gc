@@ -3905,7 +3905,9 @@
                                       )
               )
         (cond
-          ((logtest? (-> *game-info* sub-task-list (-> arg0 avail-after) flags) (game-task-node-flag closed))
+          ((or (logtest? (-> *game-info* sub-task-list (-> arg0 avail-after) flags) (game-task-node-flag closed))
+               (logtest? (-> *game-info* purchase-secrets) (-> arg0 flag)) ;; DARK FLIGHT: bought early = named
+               )
            (let ((s3-3 print-game-text))
              (format (clear *temp-string*) "~S" (lookup-text! *common-text* (-> arg0 name) #f))
              (s3-3 *temp-string* arg2 #f 44 (bucket-id progress))
