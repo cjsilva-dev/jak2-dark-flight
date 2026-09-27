@@ -66,5 +66,4 @@ it; install your favourite pack through the OpenGOAL launcher as usual.
 - Made with AI coding assistance (Claude), directed and play-tested by the author.
 - *Jak II* © Naughty Dog / Sony Interactive Entertainment. This is a fan project.
 
-OpenGOAL's own readme is kept in [README.opengoal.md](README.opengoal.md); the mod base's is in its
-history.
+The mod base's own readme (with OpenGOAL setup links) is kept in [README.opengoal.md](README.opengoal.md).
