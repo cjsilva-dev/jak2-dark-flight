@@ -3330,6 +3330,21 @@
 
 (define *dark-wings-lost* 0) ;; frames the wings have been nowhere near Jak
 
+(defun dw-live-wings ()
+  "The live wings process, or #f. Found by name every time rather than through a saved handle,
+   which could go stale (pointing at dead wings while live ones went untracked, so they were
+   killed and respawned every frame)."
+  (the-as process
+          (search-process-tree *active-pool*
+                               (lambda ((p process-tree))
+                                 (and (string= (-> p name) "dark-wings") (!= (-> (the-as process p) status) 'dead))
+                                 )
+                               )
+          )
+  )
+
+(define *dw-killed-frame?* #f) ;; wings were removed this frame: spawn next frame, not into the same slot
+
 (defbehavior dark-wings-show target ((want symbol))
   "Spawn a mirrored pair once, then just show/hide them."
   (cond
@@ -3358,16 +3373,20 @@
   ;; watchdog: a wings process that stops following Jak (its :post copies his position every
   ;; frame) is broken -- seen after a teleport, stuck with an invalid state, drawing nothing.
   ;; Forget it and spawn a fresh pair.
-  (let ((w (the-as process-drawable (handle->process *dark-wings-handle*))))
+  (set! *dw-killed-frame?* #f)
+  (let ((w (the-as process-drawable (dw-live-wings))))
     (cond
       ((and w (!= *dw-spawned-style* *df-wings-style*)) ;; the wing option changed: rebuild them
        (deactivate w)
        (set! *dark-wings-handle* (the-as handle #f))
+       (set! *dw-killed-frame?* #t)
        )
       ((and want w (< (meters 50) (vector-vector-distance (-> w root trans) (-> self root trans))))
        (set! *dark-wings-lost* (+ *dark-wings-lost* 1))
        (when (< 30 *dark-wings-lost*)
+         (deactivate w) ;; not just forget it: an orphan keeps one of the 16k pool's two slots
          (set! *dark-wings-handle* (the-as handle #f))
+         (set! *dw-killed-frame?* #t)
          (set! *dark-wings-lost* 0)
          )
        )
@@ -3378,7 +3397,9 @@
     )
   ;; only spawn when *16k-dead-pool* has a free process: otherwise debug mode falls back to the
   ;; debug pool, and a wings process there crashed the game on transform
-  (when (and want (not (handle->process *dark-wings-handle*)) (-> *16k-dead-pool* child))
+  ;; a slot freed this frame isn't reusable until the kernel finishes the kill: spawning into it at
+  ;; once gave wings that died on arrival
+  (when (and want (not *dw-killed-frame?*) (not (dw-live-wings)) (-> *16k-dead-pool* child))
     (set! *dark-wings-proc*
           (process-spawn dark-wings :init dark-wings-init :from *16k-dead-pool* :name "dark-wings" :to self))
     (set! *dark-wings-handle* (ppointer->handle *dark-wings-proc*))
