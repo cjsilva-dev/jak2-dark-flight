@@ -663,11 +663,17 @@
   (none)
   )
 
+;; DARK FLIGHT MOD: while flying in the city, the region triggers (which load/unload the city
+;; districts) are tested this far ahead of Jak, so districts start loading before he gets there.
+;; Set every frame by the flight code and cleared here after use, so it can never go stale.
+(define *df-region-lookahead* (new 'static 'vector))
+
 (defun region-execute ()
   (set! (-> *level* camera-pos 1 quad) (-> *level* camera-pos 0 quad))
-  (set! (-> *level* camera-pos 0 quad) (-> (camera-pos) quad))
+  (vector+! (the-as vector (-> *level* camera-pos)) (camera-pos) *df-region-lookahead*)
   (set! (-> *level* target-pos 1 quad) (-> *level* target-pos 0 quad))
-  (set! (-> *level* target-pos 0 quad) (-> (target-pos 0) quad))
+  (vector+! (the-as vector (-> *level* target-pos)) (target-pos 0) *df-region-lookahead*)
+  (vector-reset! *df-region-lookahead*)
   (when (and *execute-regions* (-> *setting-control* user-current region-mode) (not (paused?)))
     (region-tree-execute 'camera (-> *level* camera-pos 1) (-> *level* camera-pos 0))
     (region-tree-execute 'target (-> *level* target-pos 1) (-> *level* target-pos 0))

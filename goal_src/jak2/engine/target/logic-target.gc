@@ -2600,7 +2600,31 @@
   (none)
   )
 
+;; DARK FLIGHT v3: the airborne pose logic lives in target-darkjak.gc (dark-flight-pose) and is
+;; called by name, so it can be hot-reloaded -- states keep their own copy of target-post itself.
+(define-extern dark-flight-pose (function none :behavior target))
+
 (defbehavior target-post target ()
+  ;; DARK FLIGHT MOD: while the wings are out, hold the crouch-jump tuck (the frame the
+  ;; game itself freezes on during a high jump) in EVERY airborne state. Runs after the
+  ;; state code, right before the skeleton is evaluated, so no state can override it.
+  (cond
+    ((or (logtest? (-> self control status) (collide-status on-surface on-ground))
+         (not (focus-test? self dark)))
+     ;; grounded, or no longer Dark Jak: fold everything away no matter which state
+     ;; brought us here (getting hit or de-transforming mid-air skips the airborne hooks)
+     (when (or *dark-wings-out?* *dark-wings-want?*)
+       (set! *dark-wings-out?* #f)
+       (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
+       (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
+       (dark-wings-show #f)
+       (dark-flight-camera #f)
+       )
+     )
+    (else
+     (dark-flight-pose)
+     )
+    )
   (target-real-post)
   (none)
   )

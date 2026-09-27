@@ -95,6 +95,11 @@
 (define-extern target-gun-check (function none :behavior target))
 (define-extern target-gun-fire (function pickup-type none :behavior target))
 (define-extern target-darkjak-end-mode (function none :behavior target))
+(define-extern dark-flight-air (function none :behavior target)) ;; DARK FLIGHT MOD
+(define-extern *dark-wings-out?* symbol) ;; DARK FLIGHT MOD
+(define-extern *dark-wings-want?* symbol) ;; DARK FLIGHT MOD
+(define-extern dark-wings-show (function symbol none :behavior target)) ;; DARK FLIGHT MOD
+(define-extern dark-flight-camera (function symbol none :behavior target)) ;; DARK FLIGHT MOD
 (define-extern target-gun-init (function pickup-type none :behavior target))
 (define-extern *hit-ground-hard-mods* surface)
 (define-extern *float-mods* surface)
@@ -231,6 +236,7 @@
     (target-continue continue-point)
     target-darkjak-bomb0
     (target-darkjak-bomb1 float float)
+    target-darkjak-fly ;; DARK FLIGHT MOD
     target-darkjak-get-off
     (target-darkjak-get-on darkjak-stage)
     target-darkjak-giant

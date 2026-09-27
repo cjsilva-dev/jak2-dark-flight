@@ -523,6 +523,17 @@ This gives us more freedom to write code how we want.
     (game-options-pc-sound-language)
     (game-options-pc-text-language)
     (game-options-pc-subtitle-speaker)
+    ;; DARK FLIGHT
+    (progress-new-generic-link-to-scrolling-page (text-id progress-dark-flight)
+      (new 'static 'menu-generic-carousel-option
+        :name (text-id progress-dark-flight-wings)
+        :items (new 'static 'boxed-array :type text-id
+                    (text-id progress-dark-flight-wings-metal-head)
+                    (text-id progress-dark-flight-wings-dark-angel))
+        :get-item-index-fn (lambda () (if (= (-> *pc-settings* df-wings) 'dark-angel) 1 0))
+        :on-confirm (lambda ((index int) (the-progress progress))
+          (set! (-> *pc-settings* df-wings) (if (= index 1) 'dark-angel 'metal-head))
+          (pc-settings-save))))
     (progress-new-generic-link-to-scrolling-page (text-id progress-misc-game-options)
       (misc-options-pc-discord-rpc)
       (misc-options-pc-speedrunner-mode)
@@ -537,6 +548,17 @@ This gives us more freedom to write code how we want.
     (game-options-pc-sound-language)
     (game-options-pc-text-language)
     (game-options-pc-subtitle-speaker)
+    ;; DARK FLIGHT
+    (progress-new-generic-link-to-scrolling-page (text-id progress-dark-flight)
+      (new 'static 'menu-generic-carousel-option
+        :name (text-id progress-dark-flight-wings)
+        :items (new 'static 'boxed-array :type text-id
+                    (text-id progress-dark-flight-wings-metal-head)
+                    (text-id progress-dark-flight-wings-dark-angel))
+        :get-item-index-fn (lambda () (if (= (-> *pc-settings* df-wings) 'dark-angel) 1 0))
+        :on-confirm (lambda ((index int) (the-progress progress))
+          (set! (-> *pc-settings* df-wings) (if (= index 1) 'dark-angel 'metal-head))
+          (pc-settings-save))))
     ;; TODO - is there a reason we only display the territory setting on the title screen?
     (new 'static 'menu-generic-carousel-option
       :name (text-id progress-territory)

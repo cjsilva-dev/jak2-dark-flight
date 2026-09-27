@@ -420,6 +420,11 @@
   "eco-canister-ag.go"
   "hud-ring-ag.go"
   "jakb-ag.go"
+  "metalkor-wings-ag.go" ;; DARK FLIGHT: Metal Kor wings (see test-zone.jsonc)
+  "tpage-3092.go"
+  "tpage-2987.go"
+  "pegasus-ag.go"        ;; DARK FLIGHT: the pegasus's bat wings (the other wing style)
+  "tpage-2845.go"
   "daxter-ag.go"
   "board-ag.go"
   "gun-ag.go"

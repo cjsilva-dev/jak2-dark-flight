@@ -1011,6 +1011,7 @@
     )
   :exit target-exit
   :trans (behavior ()
+    (dark-flight-air) ;; DARK FLIGHT MOD
     (set! (-> self control unknown-float36)
           (fmax
             (-> self control unknown-float36)
@@ -1245,6 +1246,7 @@
     )
   :exit target-exit
   :trans (behavior ()
+    (dark-flight-air) ;; DARK FLIGHT MOD
     (let ((t9-0 target-falling-trans)
           (a0-0 #f)
           (v1-2 (ja-group))
@@ -1617,6 +1619,7 @@
     (set-time! (-> self state-time))
     )
   :trans (behavior ()
+    (dark-flight-air) ;; DARK FLIGHT MOD
     (target-falling-trans
       (the-as symbol (-> self control unknown-spool-anim00))
       (the-as time-frame (if (= (-> self control unknown-spool-anim00) #f)
@@ -2659,6 +2662,7 @@
     (target-exit)
     )
   :trans (behavior ()
+    (dark-flight-air) ;; DARK FLIGHT MOD
     (when (logtest? (-> self control status) (collide-status on-surface))
       (set-quaternion! (-> self control) (-> self control dir-targ))
       (go target-hit-ground #f)

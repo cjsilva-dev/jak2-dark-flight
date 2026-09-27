@@ -258,6 +258,10 @@
   "2001": "<PAD_CIRCLE>",
   "2002": "<PAD_X>",
   "2003": "<PAD_SQUARE>",
+  "2100": "Dark Flight",
+  "2101": "Wings",
+  "2102": "Metal Head",
+  "2103": "Dark Angel",
 
   "10000": "Landing Pad",
   "10001": "Metal Head Nest",

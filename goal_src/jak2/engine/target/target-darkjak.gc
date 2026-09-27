@@ -99,8 +99,52 @@
   (none)
   )
 
+(define-extern df-sfx-bank (function none)) ;; DARK FLIGHT (defined with the flight code below)
+(define-extern *df-wings-style* symbol)
+
+;; ---- DARK FLIGHT options (all off by default) ----
+;; Dark Jak and all his powers from any save, plus every city security pass so the force fields
+;; between Haven's districts open for a flying Jak (an early save has neither).
+(define *df-opt-all-dark-powers?* #f)
+;; Every Secrets-menu item bought and every OpenGOAL PC cheat unlocked (still switched on/off in
+;; their menus).
+(define *df-opt-unlock-extras?* #f)
+
 (defbehavior target-darkjak-process target ()
   (local-vars (gp-0 vector))
+  ;; DARK FLIGHT: the wing style is a PC setting (Options > Game Options > Dark Flight)
+  (set! *df-wings-style* (-> *pc-settings* df-wings))
+  (df-sfx-bank) ;; the wing style's sounds, from the player's game files
+  ;; DARK FLIGHT: fly as long as you like. The game's own Endless Dark Eco secret comes bought and
+  ;; switched ON in any save that doesn't have it yet (new games included); after that it's the
+  ;; player's to switch off in the Secrets menu, and the save remembers. Dark Jak never times out
+  ;; (darkjak-start-time is refreshed below), so without it each transform costs a full meter but
+  ;; the flight itself is unlimited.
+  (when (not (logtest? (-> *game-info* purchase-secrets) (game-secrets endless-dark)))
+    (logior! (-> *game-info* purchase-secrets) (game-secrets endless-dark))
+    (logior! (-> self game secrets) (game-secrets endless-dark))
+    )
+  (when *df-opt-all-dark-powers?*
+    (logior! (-> self game features) (game-feature darkjak darkjak-bomb0 darkjak-bomb1 darkjak-invinc darkjak-giant))
+    (logior! (-> self game features) (game-feature pass-red pass-green pass-yellow pass-blue))
+    )
+  (when *df-opt-unlock-extras?* ;; every frame, so loading a save can't take them away
+    (logior! (-> *game-info* purchase-secrets)
+             (game-secrets toggle-beard hflip-screen endless-ammo invulnerable endless-dark scene-player-1
+                           scene-player-2 scene-player-3 level-select scrap-book-1 scrap-book-2 scrap-book-3
+                           gungame-blue gungame-dark reverse-races hero-mode big-head little-head
+                           )
+             )
+    (logior! (-> *pc-settings* cheats-unlocked)
+             (pc-cheats turbo-board health-bars vehicle-health-bars vehicle-invuln statistics suck-in-all
+                        music-player no-textures fast-movies slow-movies fast-speed slow-speed fast-travel
+                        orb-tracker real-time-of-day city-peace board-tricks weather-bad weather-good hijack-lines
+                        )
+             )
+    )
+  (when (focus-test? self dark)
+    (set-time! (-> (the-as fact-info-target (-> self fact)) darkjak-start-time))
+    )
   (cond
     ((and (focus-test? self dark) (nonzero? (-> self darkjak)))
      (let ((a1-0 'eco-red))
@@ -1850,4 +1894,1492 @@
     (go target-stance)
     )
   :post (-> target-grab post)
+  )
+
+
+;; ============================ DARK FLIGHT MOD ============================
+;; Dark Jak can fly: in mid-air while transformed, press X to beat forward and
+;; gain height. Ported from the Jak 3 Light Jak flight mod.
+;;   X        flap (each flap adds to your climb, capped)
+;;   R2       boost
+;; Climb fades out near a ceiling so the camera stays behind Jak, and flying is
+;; never counted as a fall, so you always land normally.
+
+(define *darkjak-fly-mods* (new 'static 'surface
+                             :name 'darkjak-fly
+                             :turnv 131072.0
+                             :turnvv 18204.445
+                             :tiltv 32768.0
+                             :tiltvv 262144.0
+                             :transv-max 81920.0
+                             :target-speed 81920.0
+                             :seek0 0.3
+                             :seek90 0.3
+                             :seek180 0.3
+                             :fric 0.2
+                             :nonlin-fric-dist 1.0
+                             :slip-factor 1.0
+                             :slide-factor 1.0
+                             :slope-up-factor 1.0
+                             :slope-down-factor 1.0
+                             :slope-slip-angle 1.0
+                             :impact-fric 1.0
+                             :bend-factor 1.0
+                             :bend-speed 1.0
+                             :alignv 1.0
+                             :slope-up-traction 1.0
+                             :align-speed 1.0
+                             :mode 'air
+                             :flags (surface-flag check-edge air gun-off)
+                             )
+        )
+
+(define *darkjak-fly-fast-mods* (new 'static 'surface
+                             :name 'darkjak-fly-fast
+                             :turnv 131072.0
+                             :turnvv 18204.445
+                             :tiltv 32768.0
+                             :tiltvv 262144.0
+                             :transv-max 368640.0
+                             :target-speed 368640.0
+                             :seek0 0.3
+                             :seek90 0.3
+                             :seek180 0.3
+                             :fric 0.2
+                             :nonlin-fric-dist 1.0
+                             :slip-factor 1.0
+                             :slide-factor 1.0
+                             :slope-up-factor 1.0
+                             :slope-down-factor 1.0
+                             :slope-slip-angle 1.0
+                             :impact-fric 1.0
+                             :bend-factor 1.0
+                             :bend-speed 1.0
+                             :alignv 1.0
+                             :slope-up-traction 1.0
+                             :align-speed 1.0
+                             :mode 'air
+                             :flags (surface-flag check-edge air gun-off)
+                             )
+        )
+
+(defconstant DF-FLAP-IMPULSE (meters 12))
+(defconstant DF-CLIMB-CAP    (meters 20))
+(defconstant DF-GRAVITY      81920.0)
+(defconstant DF-GRAVITY-MAX  163840.0)
+(defconstant DF-ALT-SOFT     (meters 40))
+(defconstant DF-ALT-CAP      (meters 55))
+
+;; ---- DARK FLIGHT: CITY MODE (as Jak 3's) ----
+;; Haven keeps ~2 districts loaded, swapped by trigger regions, and its visibility data was built
+;; for street level. In the city: a soft absolute-height ceiling per district, the district
+;; triggers tested ahead of Jak while flying, and a gentler turbo.
+;; absolute-Y ceilings per district = highest STANDABLE surface + 8 m, at least 40 m (zoomer
+;; lanes). From a downward-ray collision survey of each district: port 86.4,
+;; inda 57.3, slumc 51.9, genc 43.7, genb 42.7, indb 36.9, farma 30.3, sluma 24.9, slumb 24.5,
+;; gena 24.2, farmb 18.8. Streets are ~8-17 m.
+(define *df-ceil-port*      (meters 94))
+(define *df-ceil-inda*      (meters 65))
+(define *df-ceil-slumc*     (meters 60))
+(define *df-ceil-genc*      (meters 52))
+(define *df-ceil-genb*      (meters 51))
+(define *df-ceil-indb*      (meters 45))
+(define *df-ceil-default*   (meters 40))  ;; sluma, slumb, gena, farma, farmb and the rest
+(define *df-city-soft*      (meters 6))   ;; climbing fades out over this band below the ceiling
+(define *df-city-lookahead* 1.0)          ;; seconds of flight ahead the district triggers see
+(define *df-in-city?* #f)
+(define *df-city-ceiling* 0.0)
+
+;; ---- DARK FLIGHT: flap motion, wing unfurl/fold, sounds ----
+;; Flight pose: the Dark Jak jump animation (aframes) follows Jak's climb/sink instead of one frozen frame.
+(define *df-pose-up*    6.0)   ;; aframe while climbing hard
+(define *df-pose-apex*  12.0)  ;; aframe at the top (the high-jump crouch)
+(define *df-pose-down*  18.0)  ;; aframe while sinking
+(define *df-pose-kick*  3.0)   ;; each flap snaps back to this wind-up, then eases on
+(define *df-pose-range* (meters 10)) ;; vertical speed for the full up/down pose
+(define *df-pose-rate*  45.0)  ;; aframes per second the pose can move
+(define *df-pose-cur*   12.0)
+(define *df-launch-pose-time* (seconds 0.6)) ;; a flap mid-glide shows the flap pose this long
+(define *df-launch-until* (the-as time-frame 0))
+(define *df-pose-launch?* #f)                ;; set by dark-flight-pose while that's showing
+;; Wings grow out of his back (with a little overshoot) and fold back in.
+(define *dark-wings-grow* 0.0)   ;; 0 folded .. 1 fully out
+(define *dw-grow-time* 0.5)
+(define *dw-overshoot* 3.2)       ;; how far past full size the wings burst before settling (1.7 = mild)
+(define *dw-fold-time* 0.2)
+(define *dw-burst-part* 64)      ;; particle group on unfurl (64 darkjak transform, 92 dark eco puff, -1 none)
+;; Sounds: each wing style's own creature sounds (see df-sfx), from the player's game files.
+
+(define *df-sfx-vol* 1024) ;; volume for the flight sounds (1024 = full)
+(define *df-sfx-bank-frames* 0) ;; counts up; the bank is (re)requested every 300 frames
+
+(define *df-sfx-bank-loaded* (the-as symbol #f)) ;; the wing style whose bank was last requested
+(define *df-glide-sfx-last* (the-as time-frame 0)) ;; last frame spent gliding (a new glide plays the swoop)
+
+(defbehavior df-sfx target ((role symbol))
+  "Play a wing sound -- 'flap or 'glide -- in the current wing style's voice: Dark Angel is the
+   Haven Forest pegasus (WING_CYCLE / PEG_GLIDE, FOREST2.SBK), Metal Head is Metal Kor
+   (NBOSS_WING_FLAP / NBOSS_HOVER, NEST6.SBK). They come from the player's own copy of the game, loaded by df-sfx-bank into the
+   extra sound bank slot this mod's engine adds (stock Jak 2's level slots are always in use)."
+  (let ((peg? (= *df-wings-style* 'dark-angel)))
+    (sound-play-by-name
+      (case role
+        (('glide) (if peg? (static-sound-name "peg-glide") (static-sound-name "nboss-hover")))
+        (else (if peg? (static-sound-name "wing-cycle") (static-sound-name "nboss-wing-flap")))
+        )
+      (new-sound-id) *df-sfx-vol* 0 0 (sound-group sfx) #t)
+    )
+  (none)
+  )
+
+(defun df-sfx-bank ()
+  "Keep the wing style's sound bank loaded: request it every ~5 s. A request for a bank that's
+   already loaded does nothing; when leaving its home level (Haven Forest / the Nest) unloads the
+   level's copy, this brings it back in the extra slot. Switching style frees the old one first."
+  (set! *df-sfx-bank-frames* (+ *df-sfx-bank-frames* 1))
+  ;; Same rules as the game's own update-sound-banks: never while the loader RPC is busy or a level
+  ;; is loading (a request mid level-load hangs the IOP), and never for a bank a level already
+  ;; holds.
+  (when (and (< 300 *df-sfx-bank-frames*)
+             (zero? (rpc-busy? 1))
+             (zero? (rpc-busy? 3))
+             (not (load-in-progress? *level*))
+             )
+    (set! *df-sfx-bank-frames* 0)
+    (let ((want (if (= *df-wings-style* 'dark-angel) 'forest2 'nest6))
+          (held #f)
+          )
+      (dotimes (i 3)
+        (if (= (-> *level* sound-bank i) want)
+            (set! held #t)
+            )
+        )
+      (cond
+        ((and *df-sfx-bank-loaded* (!= *df-sfx-bank-loaded* want)) ;; style changed: free the old one
+         (let ((old-held #f))                                          ;; (unless a level is using it)
+           (dotimes (i 3)
+             (if (= (-> *level* sound-bank i) *df-sfx-bank-loaded*)
+                 (set! old-held #t)
+                 )
+             )
+           (if (not old-held)
+               (sound-bank-unload (string->sound-name (symbol->string *df-sfx-bank-loaded*)))
+               )
+           )
+         (set! *df-sfx-bank-loaded* (the-as symbol #f))
+         )
+        ((not held)
+         (sound-bank-load (string->sound-name (symbol->string want))) ;; no-op if already loaded
+         (set! *df-sfx-bank-loaded* want)
+         )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun dw-ease ((g float))
+  "ease-out-back: 0 -> 1 with a slight overshoot"
+  (let* ((c1 *dw-overshoot*)
+         (c3 (+ c1 1.0))
+         (x (+ g -1.0))
+         )
+    (+ 1.0 (* c3 x x x) (* c1 x x))
+    )
+  )
+
+(define *df-flap-from-glide?* #f) ;; DARK FLIGHT v3 (set per tap in dark-flight-air)
+;; Jak 3 parity: flaps are at least this far apart, and holding X through a flap keeps lifting
+(define *df-flap-cooldown*    (seconds 0.35))
+(define *df-flap-hold-bonus*  (meters 10))  ;; most extra climb a fully held flap adds, m/s
+(define *df-flap-hold-accel*  (meters 25))  ;; how fast holding adds it (10/25 = 0.4 s)
+(define *df-flap-holding?* #f)
+(define *df-flap-hold-given* 0.0)
+(define *df-big-flap-impulse*  (meters 28)) ;; flap out of a glide
+(define *df-big-flap-cap*      (meters 35))
+
+(defbehavior dark-flight-flap-speed-raw target ()
+  (let* ((up (-> self control dynam gravity-normal))
+         (vspeed (vector-dot up (-> self control transv)))
+         )
+    (if *df-flap-from-glide?* ;; DARK FLIGHT v3: flapping out of a glide is a big launch
+        (fmin *df-big-flap-cap* (+ *df-big-flap-impulse* (fmax 0.0 vspeed)))
+        (fmin DF-CLIMB-CAP (+ DF-FLAP-IMPULSE (fmax 0.0 vspeed)))
+        )
+    )
+  )
+
+(defbehavior dark-flight-flap-speed target ()
+  "Flap climb speed, limited near the city ceiling (2 m/s per metre of room left)."
+  (let ((f (dark-flight-flap-speed-raw)))
+    (if (and *df-in-city?* (< 0.0 *df-city-ceiling*))
+        (fmin f (fmax 0.0 (* 2.0 (- *df-city-ceiling* (-> self control trans y)))))
+        f
+        )
+    )
+  )
+
+(defbehavior dark-flight-lift target ()
+  (set! (-> self control dynam gravity-length) DF-GRAVITY)
+  (set! (-> self control dynam gravity-max) DF-GRAVITY-MAX)
+  (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
+  (set! (-> self control mod-surface)
+        (if (cpad-hold? (-> self control cpad number) r2)
+            *darkjak-fly-fast-mods*
+            *darkjak-fly-mods*
+            )
+        )
+  (let* ((up (-> self control dynam gravity-normal))
+         (vspeed (vector-dot up (-> self control transv)))
+         (height (target-height-above-ground))
+         )
+    (when (and (< 0.0 vspeed) (< DF-ALT-SOFT height))
+      (let ((keep (fmax 0.0 (- 1.0 (/ (- height DF-ALT-SOFT) (- DF-ALT-CAP DF-ALT-SOFT))))))
+        (vector+float*! (-> self control transv) (-> self control transv) up (* vspeed (- keep 1.0)))
+        )
+      )
+    )
+  (none)
+  )
+
+(define *dark-wings-flap?* #f) ;; set by each L1 tap, consumed by the wings process
+
+(defbehavior dark-flight-beat target ()
+  "One wing beat: set the climb and play the flap."
+  (set! *dark-wings-flap?* #t)
+  (df-sfx 'flap)
+  (set! *df-pose-cur* *df-pose-kick*)
+  (set! *df-launch-until* (+ (current-time) *df-launch-pose-time*))
+  (let ((v1-0 (new-stack-vector0)))
+    (let ((f0-0 (vector-dot (-> self control dynam gravity-normal) (-> self control transv))))
+      (vector-! v1-0 (-> self control transv) (vector-float*! v1-0 (-> self control dynam gravity-normal) f0-0))
+      )
+    (vector+!
+      (-> self control transv)
+      (vector-float*! (-> self control transv) (-> self control dynam gravity-normal) (dark-flight-flap-speed))
+      v1-0
+      )
+    )
+  (none)
+  )
+
+(defstate target-darkjak-fly (target)
+  :event target-jump-event-handler
+  :enter (behavior ()
+    (set-time! (-> self state-time))
+    (logclear! (-> self control status) (collide-status on-surface on-ground touch-surface))
+    (set! (-> self control mod-surface) *darkjak-fly-mods*)
+    (set-setting! 'string-spline-max-move-player 'abs (meters 3) 0)
+    (set-setting! 'string-spline-accel-player 'abs (meters 0.07) 0)
+    (dark-flight-beat)
+    )
+  :exit (behavior ()
+    (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
+    (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
+    (remove-setting! 'string-spline-max-move-player)
+    (remove-setting! 'string-spline-accel-player)
+    (target-exit)
+    )
+  :trans (behavior ()
+    (if (logtest? (-> self control status) (collide-status on-surface))
+        (go target-hit-ground #f)
+        )
+    (if (not (focus-test? self dark))
+        (go target-falling #f)
+        )
+    (dark-flight-lift)
+    )
+  :code (behavior ()
+    ;; hold the mid-air bomb pose as a proper LOOP -- playing it with (seek!) and restarting
+    ;; every time it finished made Jak twitch.
+    (ja-channel-push! 1 (seconds 0.2))
+    (ja-no-eval :group! jakb-darkjak-bomb-loop-ja :num! (loop!) :frame-num 0.0)
+    (until #f
+      (suspend)
+      (ja :num! (loop!))
+      (when (and (cpad-pressed? (-> self control cpad number) x)
+                 (time-elapsed? (-> self state-time) (seconds 0.3))
+                 )
+        (set-time! (-> self state-time))
+        (dark-flight-beat)
+        )
+      )
+    #f
+    )
+  :post target-post
+  )
+
+
+(define-extern dark-wings-show (function symbol none :behavior target)) ;; defined further down
+(define *dark-flying?* #f)    ;; are the flight camera settings currently applied?
+(define *dark-wings-out?* #f) ;; latched on by a mid-air L1 tap, cleared on landing
+
+(defbehavior dark-flight-camera target ((on symbol))
+  "Camera tweaks applied once when flight starts and removed once when it ends.
+   Climbing fast out-ran the camera, which then sat below Jak looking up."
+  (cond
+    ((and on (not *dark-flying?*))
+     (set! *dark-flying?* #t)
+     ;; 'abs pins the camera a fixed height above Jak; 'low let it sag behind when
+     ;; climbing fast, which is how it ended up underneath him.
+     ;; same as Jak 3 True Flight: 1-10 m above Jak, fast catch-up
+     (set-setting! 'string-min-height 'abs (meters 1) 0)
+     (set-setting! 'string-max-height 'abs (meters 10) 0)
+     (set-setting! 'string-spline-max-move-player 'abs (meters 8) 0)
+     (set-setting! 'string-spline-accel-player 'abs (meters 0.2) 0)
+     (set-setting! 'string-spline-max-move 'abs (meters 8) 0)
+     (set-setting! 'string-spline-accel 'abs (meters 0.25) 0)
+     (apply-settings *setting-control*)
+     )
+    ((and (not on) *dark-flying?*)
+     (set! *dark-flying?* #f)
+     (remove-setting! 'string-min-height)
+     (remove-setting! 'string-max-height)
+     (remove-setting! 'string-spline-max-move-player)
+     (remove-setting! 'string-spline-accel-player)
+     (remove-setting! 'string-spline-max-move)
+     (remove-setting! 'string-spline-accel)
+     )
+    )
+  (none)
+  )
+
+;; ================= DARK FLIGHT v3: glide, turbo, superhero landing =================
+;; Ported from Jak 3 True Flight. Controls while Dark with wings out:
+;;   X        flap (the first X after a jump is still the double jump)
+;;   hold L1  glide (X while gliding = big launch)
+;;   R1       turbo (90 m/s, right after a flap or while gliding)    Square  superhero landing
+;; Tuning values are globals so they can be changed live from the REPL.
+(define *df-glide-sink*        (meters 3))
+(define *df-glide-cruise*      (meters 18))
+(define *df-glide-max*         (meters 45))
+(define *df-glide-accel*       (meters 10))
+(define *df-glide-turbo-accel* (meters 25))  ;; in the city
+(define *df-glide-turbo-max*   (meters 50))
+(define *df-glide-turbo-accel-open* (meters 40)) ;; outside the city
+(define *df-glide-turbo-max-open*   (meters 90))
+(define *df-glide-turbo-sink*  (meters 1))
+(define *df-glide-convert*     0.8)
+(define *df-glide-catch*       (meters 30))
+(define *df-glide-drag*        0.25)
+(define *df-glide-gravity*     49152.0)
+(define *df-glide-hold*        (seconds 0.25)) ;; how long L1 must stay held after a tap to glide
+(define *df-turbo-window*      (seconds 0.5))  ;; R1 turbo lasts this long after each flap (1.2 s flung Jak on after the last flap)
+(define *df-drop-delay*        (seconds 0.5))  ;; after this long without flapping, the fall picks up weight...
+(define *df-drop-ramp*         1.0)            ;; ...ramping over this many seconds...
+(define *df-drop-gravity*      (meters 60))    ;; ...up to this gravity (flight gravity is 20 m/s^2)
+(define *df-drop-max*          (meters 55))    ;; ...and this top fall speed (flight caps at 40 m/s)
+(define *df-fly-turbo-accel*   (meters 25))    ;; flapping turbo in the city: driven directly (the
+(define *df-fly-turbo-max*     (meters 45))    ;; surface's own easing only reached ~25 m/s)
+(define *df-fly-turbo-accel-open* (meters 40)) ;; ... and outside the city
+(define *df-fly-turbo-max-open*   (meters 90))
+(define *df-wing-glide-rate*   0.8)            ;; wing flap rate while gliding, at cruise speed
+
+(define *df-gliding?* #f)
+(define *df-glide-speed* 0.0)
+(define *df-l1-time* (the-as time-frame 0))
+(define *dark-wings-glide-rate* 0.0) ;; >0: the wings loop their flap at this rate
+
+;; DARK FLIGHT v3: glide pose. dark-flight-glide sets *df-glide-pose-on?* every frame it glides.
+;; The pose (a jakb art slot) loops on our own frame counter, so the jump states' own animation
+;; code can't restart it (that convulsed).
+(define *df-glide-pose-on?* #f)
+(define *df-glide-poses* (new 'static 'boxed-array :type int32 394 27 32 46 416 56 30))
+(define *df-glide-pose* 0)
+(define *df-glide-pose-fps* 18.0) ;; 30 looks frantic, 8-12 sluggish
+(define *df-glide-frame* 0.0)
+
+
+(define *df-glide-mods* (new 'static 'surface
+                             :name 'darkjak-glide
+                             :turnv 65536.0
+                             :turnvv 18204.445
+                             :tiltv 32768.0
+                             :tiltvv 262144.0
+                             :transv-max 409600.0
+                             :target-speed 184320.0
+                             :seek0 0.05
+                             :seek90 0.05
+                             :seek180 0.05
+                             :fric 0.05
+                             :nonlin-fric-dist 1.0
+                             :slip-factor 1.0
+                             :slide-factor 1.0
+                             :slope-up-factor 1.0
+                             :slope-down-factor 1.0
+                             :slope-slip-angle 1.0
+                             :impact-fric 1.0
+                             :bend-factor 1.0
+                             :bend-speed 1.0
+                             :alignv 1.0
+                             :slope-up-traction 1.0
+                             :align-speed 1.0
+                             :mode 'air
+                             :flags (surface-flag check-edge air gun-off)
+                             )
+        )
+
+(defbehavior dark-flight-glide-end target ()
+  (when *df-gliding?* ;; back to the flight camera band
+    (set-setting! 'string-min-height 'abs (meters 1) 0)
+    (set-setting! 'string-max-height 'abs (meters 10) 0)
+    )
+  (set! *df-gliding?* #f)
+  (set! *df-glide-pose-on?* #f)
+  (set! *dark-wings-glide-rate* 0.0)
+  (none)
+  )
+
+(defbehavior dark-flight-glide target ()
+  "Per-frame while gliding: slow sink, real dive speed becomes forward speed, R1 = turbo."
+  (let* ((up (-> self control dynam gravity-normal))
+         (tv (-> self control transv))
+         (vs (vector-dot up tv))
+         (hv (vector-! (new-stack-vector0) tv (vector-float*! (new-stack-vector0) up vs)))
+         (hs (vector-length hv))
+         (fwd (vector-z-quaternion! (new-stack-vector0) (-> self control quat-for-control)))
+         (dt (seconds-per-frame))
+         (turbo? (cpad-hold? (-> self control cpad number) r1))
+         (sink (if turbo? *df-glide-turbo-sink* *df-glide-sink*))
+         (speed-before *df-glide-speed*)
+         )
+    (when (not *df-gliding?*)
+      (set! *df-gliding?* #t)
+      (set! *df-glide-speed* hs)
+      (set! speed-before hs)
+      ;; camera up above Jak looking down on the glide, as in Jak 3
+      (set-setting! 'string-min-height 'abs (meters 4) 0)
+      (set-setting! 'string-max-height 'abs (meters 8) 0)
+      )
+    (if (logtest? (-> self control status) (collide-status touch-wall))
+        (set! *df-glide-speed* (fmin *df-glide-speed* hs))
+        )
+    (when (< vs (- sink))
+      (let ((shed (fmin (- (- sink) vs) (* *df-glide-catch* dt))))
+        (set! vs (+ vs shed))
+        ;; only real dive speed becomes forward speed, not gravity's per-frame pull
+        (set! *df-glide-speed*
+              (+ *df-glide-speed*
+                 (* *df-glide-convert* (fmax 0.0 (- shed (* 1.5 (-> self control dynam gravity-length) dt))))
+                 )
+              )
+        )
+      )
+    (cond
+      (turbo?
+        (set! *df-glide-speed* (+ *df-glide-speed* (* (if *df-in-city?* *df-glide-turbo-accel* *df-glide-turbo-accel-open*) dt)))
+        )
+      ((< *df-glide-speed* *df-glide-cruise*)
+       (set! *df-glide-speed* (fmin *df-glide-cruise* (+ *df-glide-speed* (* *df-glide-accel* dt))))
+       )
+      (else
+        (set! *df-glide-speed* (- *df-glide-speed* (* (- *df-glide-speed* *df-glide-cruise*) *df-glide-drag* dt)))
+        )
+      )
+    (set! *df-glide-speed*
+          (if turbo?
+              (fmin (if *df-in-city?* *df-glide-turbo-max* *df-glide-turbo-max-open*) *df-glide-speed*)
+              (fmin *df-glide-speed* (fmax *df-glide-max* speed-before))
+              )
+          )
+    (vector-! fwd fwd (vector-float*! (new-stack-vector0) up (vector-dot up fwd)))
+    (vector-normalize! fwd *df-glide-speed*)
+    (vector+! tv fwd (vector-float*! (new-stack-vector0) up vs))
+    (set! (-> self control dynam gravity-length) *df-glide-gravity*)
+    (set! (-> self control mod-surface) *df-glide-mods*)
+    (set! *df-glide-pose-on?* #t)
+    (if (< (seconds 0.4) (- (current-time) *df-glide-sfx-last*)) ;; a new glide: swoop
+        (df-sfx 'glide)
+        )
+    (set! *df-glide-sfx-last* (current-time))
+    (set! *dark-wings-glide-rate*
+          (fmax 0.4 (fmin 1.8 (* *df-wing-glide-rate* (/ *df-glide-speed* *df-glide-cruise*)))))
+    )
+  (none)
+  )
+
+;; Tilt Jak's whole body forward while gliding (Superman), via a callback on his root bone "main"
+;; (node 3, otherwise unused). It eases toward the target every frame, so it also straightens him
+;; back up after landing. The wings ride his chest bone, so they tilt with him.
+(define *df-glide-pitch* 72.0) ;; degrees forward while gliding (flip the sign if he leans back)
+(define *df-pitch-step* 8.0)   ;; degrees per frame toward the target
+(define *df-launch-pitch* 45.0) ;; a launch out of a glide lifts his nose from the 72 glide tilt
+(define *df-body-pitch* 0.0)
+
+(defun dark-flight-main-joint ((node cspace) (tq transformq))
+  (let ((want (cond
+                ((and *dark-wings-out?* *df-pose-launch?* *df-glide-pose-on?*) *df-launch-pitch*) ;; nose up
+                ((and *df-glide-pose-on?* *dark-wings-out?*) *df-glide-pitch*)
+                (else 0.0)
+                )
+              )
+        )
+    (set! *df-body-pitch*
+          (if (< *df-body-pitch* want)
+              (fmin want (+ *df-body-pitch* *df-pitch-step*))
+              (fmax want (- *df-body-pitch* *df-pitch-step*))
+              )
+          )
+    )
+  (when (!= *df-body-pitch* 0.0)
+    (let ((r (quaternion-axis-angle! (new 'stack-no-clear 'quaternion) 1.0 0.0 0.0 (degrees *df-body-pitch*))))
+      (quaternion*! (-> tq quat) r (-> tq quat))
+      )
+    )
+  (cspace<-parented-transformq-joint! node tq)
+  (none)
+  )
+
+(defbehavior dark-flight-pose target ()
+  "Called from target-post while airborne and Dark: which pose Jak holds in flight."
+  ;; re-attach every frame: the bone keeps whatever function object it was given, so after a
+  ;; hot-reload it kept calling the OLD tilt code
+  (set! (-> self node-list data 3 param0) dark-flight-main-joint)
+  (cond
+    ((= (-> self state name) 'target-darkjak-slam)
+     ;; superhero landing: let its own dive/landing animation play (the tuck froze it)
+     )
+    ((begin
+       (set! *df-pose-launch?* (< (current-time) *df-launch-until*))
+       (and *df-glide-pose-on?* *dark-wings-out?* (not *df-pose-launch?*))
+       )
+     (let ((a (-> self draw art-group data (-> *df-glide-poses* *df-glide-pose*))))
+       (if a
+           (let ((n (the float (+ -1 (-> (the-as art-joint-anim a) frames num-frames)))))
+             ;; ping-pong: forward then backward (these animations aren't loops, wrapping jumped)
+             (set! *df-glide-frame* (+ *df-glide-frame* (* *df-glide-pose-fps* (seconds-per-frame))))
+             (if (>= *df-glide-frame* (* 2.0 n))
+                 (set! *df-glide-frame* (- *df-glide-frame* (* 2.0 n)))
+                 )
+             (ja :group! (the-as art-joint-anim a)
+                 :num! (identity (if (< *df-glide-frame* n) *df-glide-frame* (- (* 2.0 n) *df-glide-frame*)))
+                 )
+             )
+           (ja :group! jakb-darkjak-jump-ja :num! (identity (ja-aframe 12.0 0)))
+           )
+       )
+     )
+    (*dark-wings-out?*
+     ;; Dark Jak's jump animation around the high-jump crouch (aframe 12), following the climb/sink:
+     ;; rising frames when climbing, falling frames when sinking, a wind-up kick on each flap
+     (let* ((vs (-> self control transv y))
+            (target (if (< 0.0 vs)
+                        (lerp *df-pose-apex* *df-pose-up* (fmin 1.0 (/ vs *df-pose-range*)))
+                        (lerp *df-pose-apex* *df-pose-down* (fmin 1.0 (/ (- vs) *df-pose-range*)))
+                        )
+                    )
+            (step (* *df-pose-rate* (seconds-per-frame)))
+            )
+       (set! *df-pose-cur* (if (< *df-pose-cur* target)
+                               (fmin target (+ *df-pose-cur* step))
+                               (fmax target (- *df-pose-cur* step))
+                               )
+             )
+       )
+     (ja :group! jakb-darkjak-jump-ja :num! (identity (ja-aframe *df-pose-cur* 0)))
+     )
+    )
+  (none)
+  )
+
+;; ---- superhero landing (Square) ----
+(define *df-slam-speed*       (meters 20))
+(define *df-slam-accel*       (meters 60))
+(define *df-slam-max*         (meters 60))
+(define *df-slam-boost-accel* (meters 120)) ;; while Square is held
+(define *df-slam-boost-max*   (meters 100))
+(define *df-slam-keep-xz*     0.25)
+(define *df-slam-impact*      0.0)
+(define *df-slam-blast-min*   0.6)  ;; blast radius vs a normal dark bomb, for a short drop
+(define *df-slam-blast-max*   1.5)  ;; ... and for a slam from way up
+(define *df-slam-blast-scale* 0.0)  ;; target radius of this blast
+(define *df-slam-bomb-cur* (new 'static 'array float 1)) ;; the collision radius as it grows (the
+                                                        ;; bomb helper takes a pointer to it)
+
+(defbehavior dark-flight-slam-anim target ((idx int) (blend time-frame))
+  "Start jakb art slot IDX if it is loaded (a missing animation crashes). #t if started."
+  (let ((a (-> self draw art-group data idx)))
+    (when a
+      (ja-channel-push! 1 blend)
+      (ja-no-eval :group! (the-as art-joint-anim a) :num! (seek!) :frame-num 0.0)
+      #t
+      )
+    )
+  )
+
+(defstate target-darkjak-slam (target)
+  :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
+    ;; the dark bomb's own handler, so the blast registers hits (verified: guards, citizens, bikes)
+    ((-> target-darkjak-bomb0 event) proc argc message block)
+    )
+  :enter (behavior ()
+    (set-time! (-> self state-time))
+    (dark-flight-glide-end)
+    (set! *df-body-pitch* 0.0) ;; snap upright: easing out of the glide tilt looked like rocking
+    (set! (-> self control unknown-sound-id00)
+          (add-process *gui-control* self (gui-channel jak) (gui-action queue) "darkbom0" -99.0 0)
+          )
+    (set! (-> self control mod-surface) *darkjak-fly-mods*)
+    (let* ((up (-> self control dynam gravity-normal))
+           (vs (vector-dot up (-> self control transv)))
+           (hv (vector-! (new-stack-vector0) (-> self control transv) (vector-float*! (new-stack-vector0) up vs)))
+           )
+      (vector-float*! hv hv *df-slam-keep-xz*)
+      (vector+float*! (-> self control transv) hv up (fmin vs (- *df-slam-speed*)))
+      )
+    )
+  :exit (behavior ()
+    (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
+    (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
+    (set-action!
+      *gui-control*
+      (gui-action fade)
+      (-> self control unknown-sound-id00)
+      (gui-channel none)
+      (gui-action none)
+      (the-as string #f)
+      (the-as (function gui-connection symbol) #f)
+      (the-as process #f)
+      )
+    (set! (-> self control bomb-scale) 0.0)
+    (set! *dark-flight-cam?* #f)
+    (set! *dark-wings-out?* #f)
+    (dark-wings-show #f)
+    (dark-flight-camera #f)
+    (target-exit)
+    )
+  :trans (behavior ()
+    ;; the engine clamps falls to gravity-max (40 m/s); lift it or the plunge stays floaty
+    (set! (-> self control dynam gravity-max) (+ (meters 10) *df-slam-boost-max*))
+    (vector-copy! (-> self control last-trans-any-surf) (-> self control trans)) ;; never fall damage
+    (set! *dark-flight-cam?* #t)
+    )
+  :code (behavior ()
+    (dark-flight-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
+    (set! *df-slam-impact* *df-slam-speed*)
+    (until (or (logtest? (-> self control status) (collide-status on-surface))
+               ;; landed on something that never counts as ground (a tree crown): stopped falling
+               (and (time-elapsed? (-> self state-time) (seconds 0.4))
+                    (< (fabs (-> self control transv y)) (meters 1))
+                    )
+               )
+      (let* ((up (-> self control dynam gravity-normal))
+             (vs (vector-dot up (-> self control transv)))
+             (boost? (cpad-hold? (-> self control cpad number) square))
+             (want (fmax (- (if boost? *df-slam-boost-max* *df-slam-max*))
+                         (- (fmin vs (- *df-slam-speed*))
+                            (* (if boost? *df-slam-boost-accel* *df-slam-accel*) (seconds-per-frame))
+                            )
+                         )
+                   )
+             )
+        (vector+float*! (-> self control transv) (-> self control transv) up (- want vs))
+        (set! *df-slam-impact* (- want))
+        )
+      (suspend)
+      (ja :num! (seek!)) ;; play once and hold the end pose (looping it rocked back and forth)
+      )
+    (set-forward-vel 0.0)
+    (let ((k (lerp-scale 0.0 1.0 *df-slam-impact* *df-slam-speed* *df-slam-max*)))
+      (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 255 (the-as time-frame (the int (lerp 45.0 270.0 k))))
+      (activate! *camera-smush-control* (lerp 300.0 2400.0 k) 15 (the int (lerp 40.0 120.0 k)) 1.0 0.9 (-> *display* camera-clock))
+      (set! *df-slam-impact* k)
+      )
+    (if (not (dark-flight-slam-anim 418 (seconds 0.05))) ;; jakb-darkjak-bomb-land-ja
+        (go target-stance)
+        )
+    ;; ---- the dark bomb blast (from target-darkjak-bomb0), radius scaled by the drop ----
+    (set-action!
+      *gui-control*
+      (gui-action play)
+      (-> self control unknown-sound-id00)
+      (gui-channel none)
+      (gui-action none)
+      (the-as string #f)
+      (the-as (function gui-connection symbol) #f)
+      (the-as process #f)
+      )
+    (target-start-attack)
+    (target-danger-set! 'bomb #f)
+    (let ((radius (lerp *df-slam-blast-min* *df-slam-blast-max* *df-slam-impact*))
+          (pos (new 'stack-no-clear 'vector))
+          )
+      (set! *df-slam-blast-scale* 0.0)
+      (set! (-> *df-slam-bomb-cur* 0) 0.0)
+      (vector-copy! pos (-> self control trans))
+      (set! (-> pos y) (-> self control root-prim prim-core world-sphere y))
+      (let ((pt (get-process *default-dead-pool* part-tracker #x4000)))
+        (when pt
+          ((method-of-type part-tracker activate)
+           (the-as part-tracker pt) *entity-pool* (symbol->string (-> part-tracker symbol)) (the-as pointer #x70004000)
+           )
+          (set! (-> *launch-matrix* trans quad) (-> pos quad))
+          ((the-as (function object object object object object object object object none) run-function-in-process)
+           pt part-tracker-init (-> *part-group-id-table* 63) 0 #f #f #f *launch-matrix*
+           )
+          )
+        )
+      (let ((b (process-spawn manipy :init manipy-init pos (-> self entity)
+                              (art-group-get-by-name *level* "skel-bomb-blast" (the-as (pointer uint32) #f)) #f 0
+                              :to self
+                              )
+               )
+            )
+        (when b
+          (send-event (ppointer->process b) 'anim-mode 'play1)
+          (send-event (ppointer->process b) 'anim "idle")
+          (set-vector! (-> (the-as process-drawable (-> b 0)) root scale) radius 1.0 radius 1.0)
+          )
+        )
+      (let ((b (process-spawn manipy :init manipy-init pos (-> self entity)
+                              (art-group-get-by-name *level* "skel-generic-blast" (the-as (pointer uint32) #f)) #f 0
+                              :to self
+                              )
+               )
+            )
+        (when b
+          (send-event (ppointer->process b) 'anim-mode 'play1)
+          (send-event (ppointer->process b) 'anim "idle")
+          (set-vector! (-> (the-as process-drawable (-> b 0)) root scale) radius 1.0 radius 1.0)
+          )
+        )
+      (set! *df-slam-blast-scale* radius)
+      )
+    (set-time! (-> self state-time))
+    (until (ja-done? 0)
+      (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
+      ;; the damage: grow the bomb collision out to the blast radius, like the real dark bomb
+      (target-darkjak-bomb-collide (the-as float *df-slam-bomb-cur*) *df-slam-blast-scale*)
+      (suspend)
+      (ja :num! (seek! max (lerp 1.2 0.8 *df-slam-impact*)))
+      (if (and (time-elapsed? (-> self state-time) (seconds 0.25))
+               (or (< 0.3 (-> *cpad-list* cpads (-> self control cpad number) stick0-speed))
+                   (cpad-pressed? (-> self control cpad number) x square circle)
+                   )
+               )
+          (go target-stance)
+          )
+      )
+    (go target-stance)
+    )
+  :post target-post
+  )
+
+(define *df-stream-timer* 0)
+;; ONLY real districts (each has a DGO: CTA-C, CGA-C, CIA/B, CMA/B, CFA/B, CPO). The level list
+;; also has continue points for levels with no file (ctyfence) -- asking for one ran the level
+;; heap dry and crashed the game. Mission levels (ctykora, ctyasha) stay out too.
+(define *df-city-districts* '(ctysluma ctyslumb ctyslumc ctygena ctygenb ctygenc ctyinda ctyindb
+                              ctymarka ctymarkb ctyfarma ctyfarmb ctyport))
+
+(defbehavior dark-flight-city-stream target ()
+  "Twice a second while flying in the city: load the district you're heading for. Haven's
+   districts are walled off and loaded by trigger regions at the gates, which flying over the
+   walls never crosses (you'd fly into an unloaded district and fall through it). Every
+   continue point lists the districts to load at that spot, so use the nearest one ahead."
+  (set! *df-stream-timer* (+ *df-stream-timer* 1))
+  (when (< 15 *df-stream-timer*)
+    (set! *df-stream-timer* 0)
+    (let ((p (new-stack-vector0))
+          (best (the-as continue-point #f))
+          (bestd 0.0)
+          )
+      (vector+float*! p (-> self control trans) (-> self control transv) *df-city-lookahead*)
+      (let ((lst *level-load-list*))
+        (while (not (null? lst))
+          (let ((info (-> (the-as symbol (car lst)) value)))
+            (when (and (type? info level-load-info)
+                       (string-prefix= "cty" (symbol->string (-> (the-as level-load-info info) name)))
+                       )
+              (let ((cl (-> (the-as level-load-info info) continues)))
+                (while (not (null? cl))
+                  (let* ((c (the-as continue-point (car cl)))
+                         (w0 (-> c want 0 name))
+                         )
+                    (when (and w0 (member w0 *df-city-districts*))
+                      (let* ((dx (- (-> c trans x) (-> p x)))
+                             (dz (- (-> c trans z) (-> p z)))
+                             (d (+ (* dx dx) (* dz dz)))
+                             )
+                        (when (or (not best) (< d bestd))
+                          (set! best c)
+                          (set! bestd d)
+                          )
+                        )
+                      )
+                    )
+                  (set! cl (cdr cl))
+                  )
+                )
+              )
+            )
+          (set! lst (cdr lst))
+          )
+        )
+      (when best
+        (let ((target (-> best want 0 name))
+              (have #f)
+              )
+          (dotimes (i LEVEL_MAX)
+            (if (= (-> *load-state* want i name) target)
+                (set! have #t)
+                )
+            )
+          (when (not have)
+            ;; keep everything except one level we're not standing in -- a district if there is
+            ;; one, else a side level like the garage or stadium (never ctywide / lwide*, which the
+            ;; whole city needs); add the target. Adding without dropping ran the city's level heap
+            ;; dry and crashed (garage + stadium loaded).
+            (let ((names (new 'stack-no-clear 'array 'symbol 10))
+                  (n 0)
+                  (drop (the-as symbol #f))
+                  )
+              (dotimes (i 10)
+                (set! (-> names i) #f)
+                )
+              (dotimes (pass 2)
+                (dotimes (i LEVEL_MAX)
+                  (let ((nm (-> *load-state* want i name)))
+                    (when (and nm (not drop)
+                               (!= nm 'ctywide)
+                               (!= nm (-> self current-level name))
+                               (not (string-prefix= "lwide" (symbol->string nm)))
+                               (or (= pass 1) (string-prefix= "cty" (symbol->string nm)))
+                               )
+                      (set! drop nm)
+                      )
+                    )
+                  )
+                )
+              (dotimes (i LEVEL_MAX)
+                (let ((nm (-> *load-state* want i name)))
+                  (when (and nm (!= nm drop) (< n 5))
+                    (set! (-> names n) nm)
+                    (set! n (+ n 1))
+                    )
+                  )
+                )
+              (set! (-> names n) target)
+              (want-levels *load-state* (the-as (pointer symbol) names))
+              )
+            )
+          (want-display-level *load-state* target 'display)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior dark-flight-city target ()
+  "Per frame while flying: city detection, district look-ahead, per-district altitude ceiling."
+  (set! *df-in-city?* (if (and (-> self current-level)
+                               (or (string-prefix= "cty" (symbol->string (-> self current-level name)))
+                                   (= (-> self current-level name) 'stadium) ;; the stadium's outside is city
+                                   )
+                               )
+                          #t
+                          #f
+                          )
+        )
+  (when *df-in-city?*
+    ;; Show every city district that's already loaded. Districts are displayed by trigger regions
+    ;; near their borders, which flight skips past -- the district sat in memory undrawn and you
+    ;; saw a dark cliff.
+    (dotimes (i LEVEL_MAX)
+      (let ((lv (-> *level* level i)))
+        (if (and (= (-> lv status) 'loaded)
+                 (not (-> lv display?))
+                 (string-prefix= "cty" (symbol->string (-> lv name)))
+                 )
+            (want-display-level *load-state* (-> lv name) 'display)
+            )
+        )
+      )
+    (dark-flight-city-stream)
+    (let ((nm (symbol->string (-> self current-level name))))
+      (set! *df-city-ceiling* (cond
+                                ((string-prefix= "ctyport" nm) *df-ceil-port*)
+                                ((string-prefix= "ctyinda" nm) *df-ceil-inda*)
+                                ((string-prefix= "ctyslumc" nm) *df-ceil-slumc*)
+                                ((string-prefix= "ctygenc" nm) *df-ceil-genc*)
+                                ((string-prefix= "ctygenb" nm) *df-ceil-genb*)
+                                ((string= "stadium" nm) *df-ceil-genb*)
+                                ((string-prefix= "ctyindb" nm) *df-ceil-indb*)
+                                (else *df-ceil-default*)
+                                )
+            )
+      )
+    (let ((tv (-> self control transv)))
+      (set-vector! *df-region-lookahead* (* (-> tv x) *df-city-lookahead*) 0.0 (* (-> tv z) *df-city-lookahead*) 1.0)
+      )
+    (let ((above (- (-> self control trans y) (- *df-city-ceiling* *df-city-soft*)))
+          (vs (-> self control transv y))
+          )
+      (if (and (< 0.0 above) (< 0.0 vs))
+          (set! (-> self control transv y) (* vs (fmax 0.0 (- 1.0 (/ above *df-city-soft*)))))
+          )
+      )
+    (let ((over (- (-> self control trans y) *df-city-ceiling*)))
+      (if (< 0.0 over)
+          (set! (-> self control transv y) (fmin (-> self control transv y) (* -2.0 over)))
+          )
+      )
+    )
+  (none)
+  )
+
+;; DARK FLIGHT MOD v2: no custom state -- Jak stays in the normal jump/fall states
+;; (which already handle animation, camera and landing) and we only add lift to them.
+(defbehavior dark-flight-air target ()
+  "Dark Jak flight. TAP L1 in mid-air to beat your wings -- the first tap opens them and
+   they stay out until you land, like Light Jak's flight in Jak 3. (Requiring L1 to be HELD
+   made flight switch on and off every frame while tapping, which thrashed the wings and the
+   camera settings.)"
+  (cond
+    ((and (focus-test? self dark)
+          (not (logtest? (-> self control status) (collide-status on-surface on-ground)))
+          )
+     ;; DARK FLIGHT v3 controls, same as Jak 3: X flaps, hold L1 glides, R1 turbo, Square lands.
+     ;; The first X after a jump is still the double jump; any X after that (or when falling, or
+     ;; once flying) is a flap. The press is consumed so the jump states don't also act on it.
+     (when (and (cpad-pressed? (-> self control cpad number) x)
+                (or *dark-wings-out?* (!= (-> self state name) 'target-jump))
+                )
+       (logclear! (-> *cpad-list* cpads (-> self control cpad number) button0-rel 0) (pad-buttons x))
+       ;; Jak 3 parity: a flap within the cooldown of the last one is ignored (the press is still eaten)
+       (when (or (not *dark-wings-out?*) (>= (- (current-time) *df-l1-time*) *df-flap-cooldown*))
+         (set! *df-l1-time* (current-time)) ;; = last flap time (R1 turbo window)
+         (set! *df-flap-from-glide?* *df-gliding?*) ;; flap while gliding = big launch
+         (set! *dark-wings-out?* #t)
+         (dark-flight-beat)
+         (set! *df-flap-from-glide?* #f)
+         (set! *df-flap-holding?* #t)
+         (set! *df-flap-hold-given* 0.0)
+         )
+       )
+     ;; Jak 3 parity: holding X through a flap keeps pushing up (cancelling gravity too)
+     (cond
+       ((and *df-flap-holding?*
+             (cpad-hold? (-> self control cpad number) x)
+             (< *df-flap-hold-given* *df-flap-hold-bonus*)
+             )
+        (let* ((up (-> self control dynam gravity-normal))
+               (vs (vector-dot up (-> self control transv)))
+               (dv (fmin (- *df-flap-hold-bonus* *df-flap-hold-given*) (* *df-flap-hold-accel* (seconds-per-frame))))
+               )
+          (set! dv (fmax 0.0 (fmin dv (- (+ DF-CLIMB-CAP *df-flap-hold-bonus*) vs))))
+          (if (and *df-in-city?* (< 0.0 *df-city-ceiling*)) ;; not through the city ceiling
+              (set! dv (fmin dv (fmax 0.0 (* 2.0 (- *df-city-ceiling* (-> self control trans y)))))))
+          (set! *df-flap-hold-given* (+ *df-flap-hold-given* dv))
+          (set! dv (+ dv (* (-> self control dynam gravity-length) (seconds-per-frame))))
+          (vector+float*! (-> self control transv) (-> self control transv) up dv)
+          )
+        )
+       (else
+         (set! *df-flap-holding?* #f)
+         )
+       )
+     ;; holding L1 glides, and opens the wings if they aren't out yet
+     (if (cpad-hold? (-> self control cpad number) l1)
+         (set! *dark-wings-out?* #t)
+         )
+     (cond
+       (*dark-wings-out?*
+        ;; floaty while flapping; once you stop, the fall picks up weight instead of drifting down
+        (let ((k (fmax 0.0 (fmin 1.0 (/ (* 0.0033333334 (the float (- (- (current-time) *df-l1-time*) *df-drop-delay*)))
+                                        *df-drop-ramp*
+                                        )
+                                 )
+                         )
+                 )
+              )
+          (set! (-> self control dynam gravity-length) (lerp DF-GRAVITY *df-drop-gravity* k))
+          (set! (-> self control dynam gravity-max) (lerp DF-GRAVITY-MAX *df-drop-max* k))
+          )
+        ;; never treat flight as a fall, so landing is always safe
+        (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
+        (set! (-> self control mod-surface)
+              ;; DARK FLIGHT v3: turbo on R1, only while flapping (within *df-turbo-window* of the
+              ;; last L1 tap) -- holding it through a plain fall flung Jak off. The glide has its own.
+              (if (and (cpad-hold? (-> self control cpad number) r1)
+                       (< (- (current-time) *df-l1-time*) *df-turbo-window*)
+                       )
+                  *darkjak-fly-fast-mods*
+                  *darkjak-fly-mods*
+                  )
+              )
+        (dark-wings-show #t)
+        (dark-flight-camera #t)
+        (set! *dark-flight-cam?* #t)
+        (dark-flight-city)
+        ;; flapping turbo: accelerate along Jak's facing, like the glide turbo
+        (when (and (cpad-hold? (-> self control cpad number) r1)
+                   (< (- (current-time) *df-l1-time*) *df-turbo-window*)
+                   (not (cpad-hold? (-> self control cpad number) l1))
+                   )
+          (let* ((up (-> self control dynam gravity-normal))
+                 (tv (-> self control transv))
+                 (vs (vector-dot up tv))
+                 (hs (vector-length (vector-! (new-stack-vector0) tv (vector-float*! (new-stack-vector0) up vs))))
+                 (fwd (vector-z-quaternion! (new-stack-vector0) (-> self control quat-for-control)))
+                 )
+            (vector-! fwd fwd (vector-float*! (new-stack-vector0) up (vector-dot up fwd)))
+            (vector-normalize! fwd (fmin (if *df-in-city?* *df-fly-turbo-max* *df-fly-turbo-max-open*)
+                                         (+ hs (* (if *df-in-city?* *df-fly-turbo-accel* *df-fly-turbo-accel-open*)
+                                                  (seconds-per-frame)
+                                                  )
+                                            )
+                                         )
+                               )
+            (vector+! tv fwd (vector-float*! (new-stack-vector0) up vs))
+            )
+          )
+        ;; hold L1 = glide
+        (if (cpad-hold? (-> self control cpad number) l1)
+            (dark-flight-glide)
+            (dark-flight-glide-end)
+            )
+        (if (cpad-pressed? (-> self control cpad number) square) ;; superhero landing
+            (go target-darkjak-slam)
+            )
+        )
+       (else
+         (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
+         (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
+         (set! *dark-flight-cam?* #f)
+         )
+       )
+     )
+    (else
+      ;; on the ground (or no longer Dark Jak): fold the wings away
+      (set! *dark-wings-out?* #f)
+      (set! *dark-flight-cam?* #f)
+      (dark-flight-glide-end)
+      (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
+      (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
+      (dark-wings-show #f)
+      (dark-flight-camera #f)
+      )
+    )
+  (none)
+  )
+
+
+;; ===================== DARK FLIGHT MOD: Metal Kor's wings =====================
+;; metalkor-wings-ag is a wings-only art group (Metal Kor is built from separate
+;; body/legs/torso/wings groups), so it can be strapped to Jak. It normally only
+;; ships in the nest boss level, so the .go is added to GAME.CGO in dgos/game.gd.
+;; ---- wing style (Options > Game Options > Dark Flight > Wings) ----
+;;   'metal-head -- Metal Kor's wings (default)
+;;   'dark-angel -- the Haven Forest pegasus's bat wings
+(define *df-wings-style* 'metal-head)   ;; copied from *pc-settings* every frame
+(define *dw-spawned-style* 'metal-head) ;; the style the live wings were built with (the option can change)
+;; Dark Angel: the pegasus is one whole-body model, so its body is shrunk away bone by bone and its
+;; two wing chains are mounted on Jak's back.
+(define *dw-peg-scale*  0.65)       ;; fraction of the pegasus's size
+(define *dw-peg-shrink* 0.15)       ;; its body bones shrink to this (much smaller and the renderer blows up)
+(define *dw-peg-up*     -0.2)       ;; metres along Jak's spine from his chest bone
+(define *dw-peg-back*   0.75)       ;; metres out from his back
+(define *dw-peg-pushv* (new 'static 'vector :x 10.0 :y 1.0 :z 1.0 :w 1.0)) ;; wing-root offset multiplier, per axis (x = apart)
+(define *dw-peg-swing* 0.6)         ;; how much of the flap/glide wing swing to keep (1.0: the tips cross overhead)
+(define *dw-peg-pitch-follow* 0.5)  ;; how far the wings tilt with Jak's body (0 = level like Kor's; 1 = fully,
+                                    ;; which turns them upside down in a head-down glide)
+;; The pegasus's animations bob and pitch its (hidden) body, which would swing the wings around out
+;; of step with Jak. So the body bones above the wings (main, spine, chest, neckA) are held at the
+;; held rest frame's pose, and the wing roots swing from their rest pose toward the animation.
+;; Seeded with the rest frame's values (read back in game), so the wings are right from the very
+;; first frame -- they open straight into a flap, before the rest frame has been seen.
+(define *dw-peg-rest?* #f)          ;; the rest frame is showing (recording it)
+(define *dw-peg-q-lwing* (new 'static 'quaternion :x 0.6312 :y 0.1034 :z -0.7494 :w 0.1703))
+(define *dw-peg-q-rwing* (new 'static 'quaternion :x -0.1703 :y -0.7494 :z -0.1034 :w 0.6312))
+(define *dw-peg-q-main*  (new 'static 'quaternion :x 0.8795 :w 0.4757))
+(define *dw-peg-q-spine* (new 'static 'quaternion :x -0.147 :w 0.9891))
+(define *dw-peg-q-chest* (new 'static 'quaternion :x 0.1161 :w 0.9932))
+(define *dw-peg-q-neck*  (new 'static 'quaternion :x -0.244 :w 0.9697))
+
+(defun dw-peg-body-quat! ((node cspace) (src quaternion) (dst quaternion))
+  "Body bones on the wings' path: record the rest pose, and hold it while the wings animate."
+  (let* ((jn (the-as string (-> node joint name)))
+         (slot (cond
+                 ((string= jn "main") *dw-peg-q-main*)
+                 ((string= jn "spine") *dw-peg-q-spine*)
+                 ((string= jn "chest") *dw-peg-q-chest*)
+                 ((string= jn "neckA") *dw-peg-q-neck*)
+                 (else (the-as quaternion #f))
+                 )
+               )
+         )
+    (cond
+      ((or (not slot) (!= *dw-spawned-style* 'dark-angel)) (quaternion-copy! dst src))
+      (else
+        (if *dw-peg-rest?*
+            (quaternion-copy! slot src)
+            )
+        (quaternion-copy! dst slot)
+        )
+      )
+    )
+  dst
+  )
+
+(defun dw-pegasus? ()
+  "Are the live wings the Dark Angel (pegasus) ones? (Asks the spawned wings, not the option: a
+   pegasus model asked for Kor's animations errors out and blocks any new wings.)"
+  (= *dw-spawned-style* 'dark-angel)
+  )
+
+;; The pegasus is one whole-body model: its wing chains (LwingA-C / RwingA-C) hang off neckA.
+(defskelgroup skel-dark-wings-peg pegasus pegasus-lod0-jg pegasus-idle-ja
+              ((pegasus-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 30)
+              :texture-level 6
+              )
+
+(defskelgroup skel-dark-wings metalkor-wings metalkor-wings-lod0-jg metalkor-wings-idle-ja
+              ((metalkor-wings-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 30)
+              :texture-level 6 ;; the arrow and crate skelgroups both declare this --
+                               ;; it points the renderer at the common texture bucket
+              )
+
+(deftype dark-wings (process-drawable)
+  ((offset transformq :inline)) ;; position/rotation/SCALE relative to Jak's bone
+  (:state-methods
+    idle
+    )
+  )
+
+(defconstant DW-FLAP-ANIM-SPEED 2.0) ;; fly-ja playback rate per tap
+(define *dark-wings-center* (new 'static 'vector :w 1.0))
+(define *dark-wings-center-sum* (new 'static 'vector :w 1.0))
+(define *dark-wings-center-n* 0)
+(define *dark-wings-want?* #f) ;; should the wings be visible right now?
+
+(defbehavior dw-anim dark-wings ((which symbol))
+  "The wing animation for this style: 'rest (between flaps), 'fly (one flap / loop), 'glide."
+  ;; see dw-peg-body-quat!: the body is held at the rest frame (an average over the glide flips the wings)
+  (set! *dw-peg-rest?* (= which 'rest)) ;; see dw-peg-body-quat!
+  (the-as art-joint-anim
+          (-> self draw art-group data
+              (if (dw-pegasus?)
+                  (case which (('fly) 8) (('fast) 9) (else 10)) ;; pegasus: fly / fly-doublespeed / fly-glide
+                  (case which (('rest) 3) (else 5))             ;; metal kor: idle / fly
+                  )
+              )
+          )
+  )
+
+(defstate idle (dark-wings)
+  :virtual #t
+  :code (behavior ()
+    (ja-channel-push! 1 (seconds 0.1))
+    ;; Hold frame 0 rather than playing: advancing the animation fires its effect
+    ;; tags (particles/sounds authored for the nest boss), the remaining crash suspect.
+    (ja-no-eval :group! (dw-anim 'rest) :num! (identity 0.0) :frame-num 0.0)
+    (until #f
+      (cond
+        (*dark-wings-flap?*
+          (set! *dark-wings-flap?* #f)
+          (ja-no-eval :group! (dw-anim 'fly) :num! (seek! max DW-FLAP-ANIM-SPEED) :frame-num 0.0)
+          (until (ja-done? 0)
+            (suspend)
+            (when *dark-wings-flap?* ;; a new tap restarts the beat
+              (set! *dark-wings-flap?* #f)
+              (ja-no-eval :group! (dw-anim 'fly) :num! (seek! max DW-FLAP-ANIM-SPEED) :frame-num 0.0)
+              )
+            (ja :num! (seek! max DW-FLAP-ANIM-SPEED))
+            )
+          (ja-no-eval :group! (dw-anim 'rest) :num! (identity 0.0) :frame-num 0.0)
+          )
+        ((< 0.0 *dark-wings-glide-rate*) ;; DARK FLIGHT v3: gliding -> keep beating, speed-scaled
+         (ja-no-eval :group! (dw-anim 'glide) :num! (seek! max *dark-wings-glide-rate*) :frame-num 0.0)
+         (until (or (ja-done? 0) *dark-wings-flap?*)
+           (suspend)
+           (ja :num! (seek! max (fmax 0.1 *dark-wings-glide-rate*)))
+           )
+         (if (>= 0.0 *dark-wings-glide-rate*)
+             (ja-no-eval :group! (dw-anim 'rest) :num! (identity 0.0) :frame-num 0.0)
+             )
+         )
+        (else
+          (suspend)
+          )
+        )
+      )
+    #f
+    )
+  :post (behavior ()
+    (let ((jak (the-as process-focusable (ppointer->process (-> self parent)))))
+      (when jak
+        ;; ja-post ignores the root, but the renderer CULLS against root + bounds.
+        ;; Leaving it at the origin meant the wings were culled every frame.
+        (vector-copy! (-> self root trans) (-> jak root trans))
+        (set! (-> self draw light-index) (-> jak draw light-index))
+        ;; grow out / fold in; stay drawn until fully folded
+        (set! *dark-wings-grow*
+              (if *dark-wings-want?*
+                  (fmin 1.0 (+ *dark-wings-grow* (/ (seconds-per-frame) *dw-grow-time*)))
+                  (fmax 0.0 (- *dark-wings-grow* (/ (seconds-per-frame) *dw-fold-time*)))
+                  )
+              )
+        (if (or *dark-wings-want?* (< 0.001 *dark-wings-grow*))
+            (logclear! (-> self draw status) (draw-control-status no-draw no-draw-temp))
+            (logior! (-> self draw status) (draw-control-status no-draw))
+            )
+        )
+      )
+    ;; ja-post, not transform-post: every build using ja-post survived, every build
+    ;; using transform-post died. Position comes from the root copy above.
+    (ja-post)
+    )
+  )
+
+(defconstant DW-SCALE 0.25)        ;; fraction of Metal Kor's size
+(defconstant DW-PELVIS-JOINT 3)    ;; Jak's "main" joint (pegasus mount: spine direction = main -> chest)
+(defconstant DW-ANCHOR-JOINT 6)    ;; Jak's "chest" joint: the wing bases ride on it through any pose
+(defconstant DW-ANCHOR-UP 0.0)     ;; metres above that bone
+(defconstant DW-ANCHOR-BACK 0.25)  ;; metres behind it
+
+(defun dark-wings-bind-prejoint ((node cspace) (anim transformq))
+  "Joint bind for the wings' prejoint: Jak's root (upright, yaw only), raised to his
+   back and scaled down. Everything below inherits it. Also closes last frame's
+   tally of where the four wing roots sit, so they can be re-centred on this point."
+  (let ((jak (the-as process-focusable (-> node param1)))
+        (tq (new 'stack-no-clear 'transformq))
+        (up (new 'stack-no-clear 'vector))
+        (fwd (new 'stack-no-clear 'vector)))
+    (when (> *dark-wings-center-n* 0)
+      (vector-float*! *dark-wings-center* *dark-wings-center-sum* (/ 1.0 (the float *dark-wings-center-n*)))
+      )
+    (vector-reset! *dark-wings-center-sum*)
+    (set! *dark-wings-center-n* 0)
+    (vector-y-quaternion! up (-> jak root quat))
+    (vector-z-quaternion! fwd (-> jak root quat))
+    (when (dw-pegasus?)
+      ;; pegasus: offsets follow Jak's spine (pelvis -> chest), not the world, so "back" is still his
+      ;; back when he pitches flat into a glide
+      (let ((side (new 'stack-no-clear 'vector)))
+        (vector-x-quaternion! side (-> jak root quat))
+        (vector-! up (-> jak node-list data DW-ANCHOR-JOINT bone transform trans)
+                  (-> jak node-list data DW-PELVIS-JOINT bone transform trans))
+        (vector-normalize! up 1.0)
+        (vector-cross! fwd side up) ;; = -(up x side): forward, square to the spine
+        (vector-normalize! fwd 1.0)
+        )
+      )
+    (vector+float*! (-> tq trans) (-> jak node-list data DW-ANCHOR-JOINT bone transform trans) up
+                    (* (-> jak root scale x) (meters (if (dw-pegasus?) *dw-peg-up* DW-ANCHOR-UP))))
+    ;; scale with Jak (Giant Dark Jak grows his root scale to ~2x)
+    (vector+float*! (-> tq trans) (-> tq trans) fwd (- (* (-> jak root scale x) (meters (if (dw-pegasus?) *dw-peg-back* DW-ANCHOR-BACK)))))
+    (set! (-> tq trans w) 1.0)
+    (cond
+      ((dw-pegasus?)
+       ;; pegasus: the wings turn with Jak's body too (flat when he glides flat), not just his heading
+       (let ((m (new 'stack-no-clear 'matrix)))
+         (matrix-identity! m)
+         (vector-cross! (-> m vector 0) up fwd)
+         (vector-normalize! (-> m vector 0) 1.0)
+         (vector-copy! (-> m vector 1) up)
+         (vector-cross! (-> m vector 2) (-> m vector 0) up)
+         (matrix->quaternion (-> tq quat) m)
+         ;; ...but only partway: fully pitched with a head-down glide, the wings end up upside down
+         (let ((q (new 'stack-no-clear 'quaternion)))
+           (quaternion-slerp! q (-> jak root quat) (-> tq quat) *dw-peg-pitch-follow*)
+           (quaternion-copy! (-> tq quat) q)
+           )
+         )
+       )
+      (else (quaternion-copy! (-> tq quat) (-> jak root quat)))
+      )
+    (let ((sc (* (if (dw-pegasus?) *dw-peg-scale* DW-SCALE) (-> jak root scale x) (fmax 0.001 (dw-ease *dark-wings-grow*)))))
+      (set-vector! (-> tq scale) sc sc sc 1.0)
+      )
+    (matrix<-transformq! (-> node bone transform) tq)
+    )
+  (none)
+  )
+
+(defun dark-wings-bind-wingroot ((node cspace) (anim transformq))
+  "Joint bind for the four wing roots: keep the animated rotation, but subtract the
+   roots' shared centroid from the translation (authored at Kor's back height)."
+  (let ((tq (new 'stack-no-clear 'transformq)))
+    (vector+! *dark-wings-center-sum* *dark-wings-center-sum* (-> anim trans))
+    (+! *dark-wings-center-n* 1)
+    (if (dw-pegasus?)
+        (vector-reset! (-> tq trans)) ;; pegasus: this is its body root; pin it on the mount (no bob)
+        (vector-! (-> tq trans) (-> anim trans) *dark-wings-center*)
+        )
+    (set! (-> tq trans w) 1.0)
+    (dw-peg-body-quat! node (-> anim quat) (-> tq quat))
+    (set! (-> tq scale quad) (-> anim scale quad))
+    (cspace<-parented-transformq-joint! node tq)
+    )
+  (none)
+  )
+
+(defun dw-bind-shrink ((node cspace) (anim transformq))
+  "Pegasus body: shrink this bone to almost nothing. (Bone scale doesn't carry down to child bones in
+   this engine -- only their offsets shrink -- so every body bone gets this.)"
+  (let ((tq (new 'stack-no-clear 'transformq)))
+    (vector-copy! (-> tq trans) (-> anim trans))
+    (dw-peg-body-quat! node (-> anim quat) (-> tq quat))
+    (vector-float*! (-> tq scale) (-> anim scale) *dw-peg-shrink*)
+    (set! (-> tq scale w) 1.0)
+    (cspace<-parented-transformq-joint! node tq)
+    )
+  (none)
+  )
+
+(defun dw-bind-grow ((node cspace) (anim transformq))
+  "Pegasus wing roots: the shrunk parent pulls this bone's offset in; push it back out. Scale stays."
+  (let ((tq (new 'stack-no-clear 'transformq))
+        (slot (if (string= (the-as string (-> node joint name)) "LwingA") *dw-peg-q-lwing* *dw-peg-q-rwing*))
+        )
+    (vector*! (-> tq trans) (-> anim trans) *dw-peg-pushv*)
+    (set! (-> tq trans w) 1.0)
+    ;; flaps and glides: blend from the rest spread toward the animation (full swing crosses overhead)
+    (cond
+      (*dw-peg-rest?* ;; the held rest frame: the wings' neutral spread, the base for flaps and glides
+        (quaternion-copy! slot (-> anim quat))
+        (quaternion-copy! (-> tq quat) (-> anim quat))
+        )
+      (else (quaternion-slerp! (-> tq quat) slot (-> anim quat) *dw-peg-swing*))
+      )
+    (vector-copy! (-> tq scale) (-> anim scale))
+    (cspace<-parented-transformq-joint! node tq)
+    )
+  (none)
+  )
+
+(defbehavior dark-wings-init-side dark-wings ((side float))
+  (set! *dw-spawned-style* *df-wings-style*)
+  (set! (-> self root) (new 'process 'trsqv))
+  (set-vector! (-> self root scale) 0.15 0.15 0.15 1.0) ;; Metal Kor is dragon-sized
+  (quaternion-identity! (-> self root quat))
+  (initialize-skeleton self (if (dw-pegasus?) skel-dark-wings-peg skel-dark-wings) (the-as pair 0))
+  (logclear! (-> self draw status) (draw-control-status no-draw no-draw-temp))
+  (logior! (-> self skel status) (joint-control-status sync-math)) ;; as Daxter does
+  ;; ja-post animates but does NOT apply a root transform, so the model would sit at the
+  ;; world origin. Bind our root node to a bone on Jak, exactly as Jak 3's wings do --
+  ;; that is what actually carries the wings around with him.
+  (let ((jak (as-type (ppointer->process (-> self parent)) process-focusable)))
+    (when (and jak (< 6 (-> jak node-list length)))
+      ;; cspace<-cspace-normalized! STRIPS SCALE, so the wings rendered at Metal Kor's
+      ;; boss size -- big enough that the camera sits inside them and sees back faces.
+      ;; Bind through an offset transform instead, which carries scale (as Daxter does).
+      ;; EXACTLY the arrow's offset: identity rotation, no translation, scale 1.
+      (quaternion-identity! (-> self offset quat))
+      (set-vector! (-> self offset trans) 0.0 0.0 0.0 1.0)
+      (set-vector! (-> self offset scale) 0.15 0.15 0.15 1.0)
+      (let ((nl (-> self node-list data)))
+        (set! (-> nl 0 param0) (the-as (function cspace transformq none) cspace<-cspace+transformq!))
+        (set! (-> nl 0 param1) (the-as basic (-> jak node-list data 6)))
+        (set! (-> nl 0 param2) (the-as basic (-> self offset)))
+        )
+      ;; Bind every top-level joint (parent is none / prejoint / align) straight to Jak.
+      (dotimes (i (-> self node-list length))
+        (let ((node (-> self node-list data i)))
+          (when (-> node joint)
+            (let* ((pj (-> node joint parent))
+                   (pname (if pj (the-as string (-> pj name)) "<none>")))
+              (when (and (>= i 3) pj (string= pname "prejoint"))
+                (set! (-> node param0) dark-wings-bind-wingroot)
+                )
+              (when (dw-pegasus?)
+                (cond
+                  ((let ((jn (the-as string (-> node joint name))))
+                     (or (string= jn "LwingA") (string= jn "RwingA")))       ;; wing roots: undo the pull-in
+                   (set! (-> node param0) dw-bind-grow)
+                   )
+                  ((let ((jn (the-as string (-> node joint name))))
+                     (or (string= jn "LwingB") (string= jn "LwingC") (string= jn "RwingB") (string= jn "RwingC")))
+                   #f                                                        ;; rest of the wing: as animated
+                   )
+                  ((>= i 4)                                                  ;; every body bone: shrink away
+                   (set! (-> node param0) dw-bind-shrink)
+                   )
+                  )
+                )
+              (when (= i 2) ;; prejoint
+                (set! (-> node param0) dark-wings-bind-prejoint)
+                (set! (-> node param1) (the-as basic jak))
+                )
+              )
+            )
+          )
+        )
+      ;; the boss animations carry effect tags (nest particles/sounds) -- never fire them
+      (set! (-> self skel effect) #f)
+      )
+    )
+  ;; WITHOUT THIS the process has no state, never ticks, and is collected -- it was
+  ;; lost in an earlier edit and is why nothing ever rendered.
+  (go-virtual idle)
+  )
+
+(define *dark-wings-proc* (the-as (pointer process) #f))
+(define *dark-wings-handle* (the-as handle #f)) ;; resolves to #f once the wings die (Jak's death kills them)
+
+(defbehavior dark-wings-init dark-wings ()
+  (dark-wings-init-side -1.0)
+  (none)
+  )
+
+(define *dark-wings-lost* 0) ;; frames the wings have been nowhere near Jak
+
+(defbehavior dark-wings-show target ((want symbol))
+  "Spawn a mirrored pair once, then just show/hide them."
+  (cond
+    ((and want (not *dark-wings-want?*))
+     ;; unfurling: sound, one spreading flap, a burst of dark eco at his back
+     (df-sfx 'flap)
+     (set! *dark-wings-flap?* #t)
+     (when (<= 0 *dw-burst-part*)
+       (let ((pt (get-process *default-dead-pool* part-tracker #x4000)))
+         (when pt
+           ((method-of-type part-tracker activate)
+            (the-as part-tracker pt) self (symbol->string (-> part-tracker symbol)) (the-as pointer #x70004000)
+            )
+           (vector<-cspace! (-> *launch-matrix* trans) (-> self node-list data DW-ANCHOR-JOINT))
+           ((the-as (function object object object object object object object object none) run-function-in-process)
+            pt part-tracker-init (-> *part-group-id-table* *dw-burst-part*) 0 #f #f #f *launch-matrix*
+            )
+           )
+         )
+       )
+     )
+    ((and (not want) *dark-wings-want?*)
+     )
+    )
+  (set! *dark-wings-want?* want)
+  ;; watchdog: a wings process that stops following Jak (its :post copies his position every
+  ;; frame) is broken -- seen after a teleport, stuck with an invalid state, drawing nothing.
+  ;; Forget it and spawn a fresh pair.
+  (let ((w (the-as process-drawable (handle->process *dark-wings-handle*))))
+    (cond
+      ((and w (!= *dw-spawned-style* *df-wings-style*)) ;; the wing option changed: rebuild them
+       (deactivate w)
+       (set! *dark-wings-handle* (the-as handle #f))
+       )
+      ((and want w (< (meters 50) (vector-vector-distance (-> w root trans) (-> self root trans))))
+       (set! *dark-wings-lost* (+ *dark-wings-lost* 1))
+       (when (< 30 *dark-wings-lost*)
+         (set! *dark-wings-handle* (the-as handle #f))
+         (set! *dark-wings-lost* 0)
+         )
+       )
+      (else
+        (set! *dark-wings-lost* 0)
+        )
+      )
+    )
+  ;; only spawn when *16k-dead-pool* has a free process: otherwise debug mode falls back to the
+  ;; debug pool, and a wings process there crashed the game on transform
+  (when (and want (not (handle->process *dark-wings-handle*)) (-> *16k-dead-pool* child))
+    (set! *dark-wings-proc*
+          (process-spawn dark-wings :init dark-wings-init :from *16k-dead-pool* :name "dark-wings" :to self))
+    (set! *dark-wings-handle* (ppointer->handle *dark-wings-proc*))
+    )
+  (none)
   )

@@ -2973,6 +2973,16 @@ into 7 sections, which might explain the weird sizes in the center.
           )
         )
       )
+    ;; DARK FLIGHT MOD: keep the wings art pack (test-zone.fr3, which carries
+    ;; metalkor-wings + its tpages) resident in the PC renderer everywhere.
+    (let ((placed #f))
+      (dotimes (i LEVEL_MAX)
+        (when (and (not placed) (string= (-> lev-names i) "none"))
+          (set! (-> lev-names i) "test-zone")
+          (set! placed #t)
+          )
+        )
+      )
     (__pc-set-levels lev-names)
     (__pc-set-active-levels active-lev-names)
     )
