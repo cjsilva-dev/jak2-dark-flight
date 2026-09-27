@@ -1,48 +1,70 @@
-> [!NOTE]
-> You can read the original README for the OpenGOAL project [here](https://github.com/open-goal/jak-project/blob/master/README.md).
-> In particular you may want to check out the Development Environment setup [here](https://github.com/open-goal/jak-project/blob/master/README.md#setting-up-a-development-environment)
+# Dark Flight — Jak II
 
-# OpenGoal-Mod-Base
-Serves as a base template for openGOAL mods that will be supported via [OG-ModLauncher](https://github.com/OpenGOAL-Mods/OG-ModLauncher).
+**Dark Jak grows wings and flies.** An [OpenGOAL](https://opengoal.dev) mod for *Jak II* that gives Dark
+Jak the full flight of Jak 3's True Flight mod: stacking wing flaps, a momentum glide, a turbo, and a
+superhero landing that sets off a Dark Bomb blast — with a choice of two sets of wings.
 
-- Please ensure you are not committing copyrighted material to your repo (the `.gitignore` should help prevent this). 
-- Generally speaking you should only be updating certain directories/files:
-  - GOAL code (`/goal_src`)
-  - Assets specific to the PC Port (`/game/assets/jak1/`, `/custom_assets/`)
-  - The executable binaries (`/out/build/Release/goalc.exe`, `/out/build/Release/gk.exe`, `/out/build/Release/extractor.exe`)
-  - Decompiler config (`/decompiler/config`)
+## Controls (as Dark Jak)
 
-## Custom Navmesh Implementation and Example
+| Input | Action |
+|---|---|
+| **X** in the air | The first X after a jump is still the double jump; after that, each X unfurls the wings and flaps. Every flap stacks more height; **hold X** through a flap for extra lift. Stop flapping and the fall picks up weight |
+| **Hold L1** | Glide. Diving turns into forward speed, and the momentum carries |
+| **X while gliding** | Big launch upward (Jak lifts his nose into it) |
+| **R1** | Turbo — right after a flap, or on top of a glide |
+| **Square** in the air | Superhero landing: an accelerating dive ending in a Dark Bomb blast. No fall damage from any height |
 
-LuminarLight made changes that allow placing custom navmesh into Jak 1 levels. This will hopefully become useless one day, if proper navmesh support is ever added to OpenGOAL.
+The camera follows Jak's height while flying. Dark Jak doesn't time out, so you can fly for as long as
+you like.
 
-The navmesh system in Jak II is more advanced, I haven't managed to figure it out yet.
+### In Haven City
 
-### Getting Started
+Haven only keeps a couple of districts loaded at once, so flight there is tuned to it: each district has
+its own ceiling (just above the highest place you can stand), the turbo is capped, and districts are
+loaded and shown ahead of you as you fly — including over the walls between them.
 
-Please keep in mind that you are expected to be familiar with custom levels and GOAL. Still, I tried to make things as understandable as possible.
+## Settings
 
-I would recommend copying an existing navmesh as a start. You can use the inspect method I made. The actor whose navmesh you want to copy must be loaded. Example:
-`(inspect (-> (the-as entity-actor (entity-by-name "snow-bunny-55")) nav-mesh))`
+- **Wings** — *Options > Game Options > Dark Flight*:
+  - **Metal Head** (default): Metal Kor's wings, with his wing-beat and hover sounds.
+  - **Dark Angel**: the bat wings of the pegasus that flies through Haven Forest, with its sounds.
+- **Endless Dark Eco** — the game's own *Secrets* menu item. The mod unlocks it and switches it **on**
+  in any save that doesn't have it yet; switch it off there if you'd rather collect dark eco (each
+  transformation then costs a full meter, as in the original game — the flight itself stays unlimited).
 
-You should change the origin and bounds, depending on where you want to place your navmesh.
+## Options for testing
 
-I usually just remove the nodes, because I do not understand it and things seem fine without it. But keep in mind that every navmesh that is in the game has at least one node.
+At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
 
-We do not understand route, but it is needed - otherwise game will crash. If you copy an existing navmesh, the route data is copied correctly. But since we don't understand it, for fully custom navmesh we can never have proper route data. Correct route data is essential if you want to take advantage of gap triangles (where enemies jump).
+- `*df-opt-all-dark-powers?*` — Dark Jak and all his powers from any save, plus every city security pass
+  (so the force fields between districts open for a flying Jak)
+- `*df-opt-unlock-extras?*` — every Secrets-menu item and OpenGOAL PC cheat unlocked
 
-You can make multiple enemies use the same navmesh. To do this, create the navmesh through code for the first actor, like in the example. And for the other actors, add a lump that tells the game to use another actor's navmesh. Reference is by aid. Example: `"nav-mesh-actor": ["uint32", 40000]`. Tip: You can do the same thing with paths, using the `path-actor` lump.
+## What this mod changes
 
-If the game crashes when you approach a custom navmesh, make sure you added `:custom-hacky? #t` to your custom navmesh definition. If that is there, then check if the actor has a path. It needs a path.
+- `goal_src/jak2/engine/target/target-darkjak.gc` — the flight, glide, turbo, landing, wings and sounds
+- `goal_src/jak2/engine/target/{target,logic-target,target-h}.gc` — hooks the flight into Jak's air states
+- `goal_src/jak2/engine/camera/cam-master.gc` — the camera tracks Jak's height while flying
+- `goal_src/jak2/engine/level/region.gc` — city district triggers are tested ahead of a flying Jak
+- `goal_src/jak2/engine/level/level.gc`, `goal_src/jak2/dgos/game.gd`,
+  `custom_assets/jak2/levels/test-zone/test-zone.jsonc` — keep both wing models loaded everywhere
+- `goal_src/jak2/pc/…`, `goal_src/jak2/engine/ui/text-id-h.gc`, `game/assets/jak2/text/` — the Dark
+  Flight settings page
+- `game/overlord/common/sbank.cpp` — **engine change:** one extra sound bank slot. Stock *Jak II* can hold
+  six sound banks and uses all of them, so there's no room for the wings' sounds; this adds a seventh.
 
-If something is still unclear, please look at the code. I added a lot of comments.
+## Not included
 
-### Final Words
+This mod contains only code. Everything it shows or plays — Dark Jak, both sets of wings and their
+sounds, the Dark Bomb effects — comes from your own copy of *Jak II*. HD texture packs are not part of
+it; install your favourite pack through the OpenGOAL launcher as usual.
 
-I am not an expert at decompiling, so my methods were not the most efficient. But with a lot of time, I managed to figure things out. There are probably people who could do this a lot better than me. Hopefully it will happen.
+## Credits
 
-Also, I know my inspect method is not perfect. But it is very tedious to write such a thing, so I just included what we really need. And I think the nodes part could use a cleanup.
+- Built on the [OG-Mod-Base](https://github.com/OpenGOAL-Mods/OG-Mod-Base) template and the
+  [OpenGOAL](https://github.com/open-goal/jak-project) project.
+- Made with AI coding assistance (Claude), directed and play-tested by the author.
+- *Jak II* © Naughty Dog / Sony Interactive Entertainment. This is a fan project.
 
-I am happy if anyone finds this useful. But I have a request: If you learn more about navmeshes, especially things that would benefit other modders as well, please let me know. And maybe we will add it to this branch.
-
-*~~Luminar Light*
+OpenGOAL's own readme is kept in [README.opengoal.md](README.opengoal.md); the mod base's is in its
+history.
