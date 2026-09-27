@@ -100,6 +100,8 @@
   )
 
 (define-extern df-sfx-bank (function none)) ;; DARK FLIGHT (defined with the flight code below)
+(define-extern dw-retire-folded-wings (function none))
+(define-extern dark-flight-guard (function none :behavior target))
 (define-extern *df-wings-style* symbol)
 
 ;; ---- DARK FLIGHT options (all off by default) ----
@@ -117,6 +119,8 @@
   (logior! (-> *game-info* purchase-secrets) (game-secrets dark-angel-wings))
   (set! *df-wings-style* (if (logtest? (-> self game secrets) (game-secrets dark-angel-wings)) 'dark-angel 'metal-head))
   (df-sfx-bank) ;; the wing style's sounds, from the player's game files
+  (dark-flight-guard) ;; wings out but no longer flying (died, grabbed, hijacked a zoomer...): fold them
+  (dw-retire-folded-wings) ;; free the wings' process slot once they're put away (the Titan suit needs it)
   ;; DARK FLIGHT: fly as long as you like. The game's own Endless Dark Eco secret comes bought and
   ;; switched ON in any save that doesn't have it yet (new games included); after that it's the
   ;; player's to switch off in the Secrets menu, and the save remembers. Dark Jak never times out
@@ -1900,12 +1904,9 @@
 
 
 ;; ============================ DARK FLIGHT MOD ============================
-;; Dark Jak can fly: in mid-air while transformed, press X to beat forward and
-;; gain height. Ported from the Jak 3 Light Jak flight mod.
-;;   X        flap (each flap adds to your climb, capped)
-;;   R2       boost
-;; Climb fades out near a ceiling so the camera stays behind Jak, and flying is
-;; never counted as a fall, so you always land normally.
+;; Dark Jak can fly, as Light Jak does in Jak 3's True Flight mod. Controls and the flight code
+;; itself are further down ("glide, turbo, superhero landing"); this part is the surfaces and the
+;; flap constants they share.
 
 (define *darkjak-fly-mods* (new 'static 'surface
                              :name 'darkjak-fly
@@ -1969,8 +1970,6 @@
 (defconstant DF-CLIMB-CAP    (meters 20))
 (defconstant DF-GRAVITY      81920.0)
 (defconstant DF-GRAVITY-MAX  163840.0)
-(defconstant DF-ALT-SOFT     (meters 40))
-(defconstant DF-ALT-CAP      (meters 55))
 
 ;; ---- DARK FLIGHT: CITY MODE (as Jak 3's) ----
 ;; Haven keeps ~2 districts loaded, swapped by trigger regions, and its visibility data was built
@@ -1988,7 +1987,7 @@
 (define *df-ceil-indb*      (meters 45))
 (define *df-ceil-default*   (meters 40))  ;; sluma, slumb, gena, farma, farmb and the rest
 (define *df-city-soft*      (meters 6))   ;; climbing fades out over this band below the ceiling
-(define *df-city-lookahead* 1.0)          ;; seconds of flight ahead the district triggers see
+(define *df-city-lookahead* 1.0)          ;; seconds of flight ahead the district streamer looks
 (define *df-in-city?* #f)
 (define *df-city-ceiling* 0.0)
 
@@ -2006,6 +2005,7 @@
 (define *df-pose-launch?* #f)                ;; set by dark-flight-pose while that's showing
 ;; Wings grow out of his back (with a little overshoot) and fold back in.
 (define *dark-wings-grow* 0.0)   ;; 0 folded .. 1 fully out
+(define *dw-last-shown* (the-as time-frame 0)) ;; last frame the wings were out or folding
 (define *dw-grow-time* 0.5)
 (define *dw-overshoot* 3.2)       ;; how far past full size the wings burst before settling (1.7 = mild)
 (define *dw-fold-time* 0.2)
@@ -2034,28 +2034,43 @@
   (none)
   )
 
+(define *df-sfx-idle-frames* 0)   ;; consecutive frames with no level/bank loading going on
+(define *df-sfx-was-held* #f)      ;; last frame, a level held our bank (so leaving that level unloads it)
+
 (defun df-sfx-bank ()
-  "Keep the wing style's sound bank loaded: request it every ~5 s. A request for a bank that's
-   already loaded does nothing; when leaving its home level (Haven Forest / the Nest) unloads the
-   level's copy, this brings it back in the extra slot. Switching style frees the old one first."
+  "Keep the wing style's sound bank loaded in the extra slot. Loads are only ever requested when
+   the game's own loader would also be allowed to (update-sound-banks / the music loader): loader
+   RPCs idle, no level loading, bank loading not frozen by a cutscene, no movie -- and only after
+   that has held for a second, so a request can't land in the middle of a level transition (the
+   IOP hang). Requests are re-sent every ~5 s (a no-op if the bank is still there) and promptly
+   after a level that held the same bank lets it go (leaving Haven Forest / the Nest unloads it by
+   name). There's no load confirmation from the IOP, so *df-sfx-bank-loaded* means 'requested'."
   (set! *df-sfx-bank-frames* (+ *df-sfx-bank-frames* 1))
-  ;; Same rules as the game's own update-sound-banks: never while the loader RPC is busy or a level
-  ;; is loading (a request mid level-load hangs the IOP), and never for a bank a level already
-  ;; holds.
-  (when (and (< 300 *df-sfx-bank-frames*)
-             (zero? (rpc-busy? 1))
-             (zero? (rpc-busy? 3))
-             (not (load-in-progress? *level*))
-             )
-    (set! *df-sfx-bank-frames* 0)
-    (let ((want (if (= *df-wings-style* 'dark-angel) 'forest2 'nest6))
-          (held #f)
-          )
-      (dotimes (i 3)
-        (if (= (-> *level* sound-bank i) want)
-            (set! held #t)
+  (set! *df-sfx-idle-frames*
+        (if (and (zero? (rpc-busy? 1))
+                 (zero? (rpc-busy? 3))
+                 (not (load-in-progress? *level*))
+                 (-> *setting-control* user-current sound-bank-load)
+                 (not (-> *setting-control* user-current movie))
+                 )
+            (+ *df-sfx-idle-frames* 1)
+            0
             )
         )
+  (let ((want (if (= *df-wings-style* 'dark-angel) 'forest2 'nest6))
+        (held #f)
+        )
+    (dotimes (i 3)
+      (if (= (-> *level* sound-bank i) want)
+          (set! held #t)
+          )
+      )
+    (if (and *df-sfx-was-held* (not held)) ;; the level copy just went away: ask again soon
+        (set! *df-sfx-bank-frames* 300)
+        )
+    (set! *df-sfx-was-held* held)
+    (when (and (< 300 *df-sfx-bank-frames*) (< 60 *df-sfx-idle-frames*))
+      (set! *df-sfx-bank-frames* 0)
       (cond
         ((and *df-sfx-bank-loaded* (!= *df-sfx-bank-loaded* want)) ;; style changed: free the old one
          (let ((old-held #f))                                          ;; (unless a level is using it)
@@ -2069,6 +2084,7 @@
                )
            )
          (set! *df-sfx-bank-loaded* (the-as symbol #f))
+         (set! *df-sfx-bank-frames* 300) ;; load the new one on the next idle frame
          )
         ((not held)
          (sound-bank-load (string->sound-name (symbol->string want))) ;; no-op if already loaded
@@ -2090,7 +2106,7 @@
     )
   )
 
-(define *df-flap-from-glide?* #f) ;; DARK FLIGHT v3 (set per tap in dark-flight-air)
+(define *df-flap-from-glide?* #f) ;; set per tap in dark-flight-air
 ;; Jak 3 parity: flaps are at least this far apart, and holding X through a flap keeps lifting
 (define *df-flap-cooldown*    (seconds 0.35))
 (define *df-flap-hold-bonus*  (meters 10))  ;; most extra climb a fully held flap adds, m/s
@@ -2104,7 +2120,7 @@
   (let* ((up (-> self control dynam gravity-normal))
          (vspeed (vector-dot up (-> self control transv)))
          )
-    (if *df-flap-from-glide?* ;; DARK FLIGHT v3: flapping out of a glide is a big launch
+    (if *df-flap-from-glide?* ;; flapping out of a glide is a big launch
         (fmin *df-big-flap-cap* (+ *df-big-flap-impulse* (fmax 0.0 vspeed)))
         (fmin DF-CLIMB-CAP (+ DF-FLAP-IMPULSE (fmax 0.0 vspeed)))
         )
@@ -2119,29 +2135,6 @@
         f
         )
     )
-  )
-
-(defbehavior dark-flight-lift target ()
-  (set! (-> self control dynam gravity-length) DF-GRAVITY)
-  (set! (-> self control dynam gravity-max) DF-GRAVITY-MAX)
-  (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
-  (set! (-> self control mod-surface)
-        (if (cpad-hold? (-> self control cpad number) r2)
-            *darkjak-fly-fast-mods*
-            *darkjak-fly-mods*
-            )
-        )
-  (let* ((up (-> self control dynam gravity-normal))
-         (vspeed (vector-dot up (-> self control transv)))
-         (height (target-height-above-ground))
-         )
-    (when (and (< 0.0 vspeed) (< DF-ALT-SOFT height))
-      (let ((keep (fmax 0.0 (- 1.0 (/ (- height DF-ALT-SOFT) (- DF-ALT-CAP DF-ALT-SOFT))))))
-        (vector+float*! (-> self control transv) (-> self control transv) up (* vspeed (- keep 1.0)))
-        )
-      )
-    )
-  (none)
   )
 
 (define *dark-wings-flap?* #f) ;; set by each L1 tap, consumed by the wings process
@@ -2164,53 +2157,6 @@
     )
   (none)
   )
-
-(defstate target-darkjak-fly (target)
-  :event target-jump-event-handler
-  :enter (behavior ()
-    (set-time! (-> self state-time))
-    (logclear! (-> self control status) (collide-status on-surface on-ground touch-surface))
-    (set! (-> self control mod-surface) *darkjak-fly-mods*)
-    (set-setting! 'string-spline-max-move-player 'abs (meters 3) 0)
-    (set-setting! 'string-spline-accel-player 'abs (meters 0.07) 0)
-    (dark-flight-beat)
-    )
-  :exit (behavior ()
-    (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
-    (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
-    (remove-setting! 'string-spline-max-move-player)
-    (remove-setting! 'string-spline-accel-player)
-    (target-exit)
-    )
-  :trans (behavior ()
-    (if (logtest? (-> self control status) (collide-status on-surface))
-        (go target-hit-ground #f)
-        )
-    (if (not (focus-test? self dark))
-        (go target-falling #f)
-        )
-    (dark-flight-lift)
-    )
-  :code (behavior ()
-    ;; hold the mid-air bomb pose as a proper LOOP -- playing it with (seek!) and restarting
-    ;; every time it finished made Jak twitch.
-    (ja-channel-push! 1 (seconds 0.2))
-    (ja-no-eval :group! jakb-darkjak-bomb-loop-ja :num! (loop!) :frame-num 0.0)
-    (until #f
-      (suspend)
-      (ja :num! (loop!))
-      (when (and (cpad-pressed? (-> self control cpad number) x)
-                 (time-elapsed? (-> self state-time) (seconds 0.3))
-                 )
-        (set-time! (-> self state-time))
-        (dark-flight-beat)
-        )
-      )
-    #f
-    )
-  :post target-post
-  )
-
 
 (define-extern dark-wings-show (function symbol none :behavior target)) ;; defined further down
 (define *dark-flying?* #f)    ;; are the flight camera settings currently applied?
@@ -2246,7 +2192,7 @@
   (none)
   )
 
-;; ================= DARK FLIGHT v3: glide, turbo, superhero landing =================
+;; ================= glide, turbo, superhero landing =================
 ;; Ported from Jak 3 True Flight. Controls while Dark with wings out:
 ;;   X        flap (the first X after a jump is still the double jump)
 ;;   hold L1  glide (X while gliding = big launch)
@@ -2282,12 +2228,11 @@
 (define *df-l1-time* (the-as time-frame 0))
 (define *dark-wings-glide-rate* 0.0) ;; >0: the wings loop their flap at this rate
 
-;; DARK FLIGHT v3: glide pose. dark-flight-glide sets *df-glide-pose-on?* every frame it glides.
+;; glide pose. dark-flight-glide sets *df-glide-pose-on?* every frame it glides.
 ;; The pose (a jakb art slot) loops on our own frame counter, so the jump states' own animation
 ;; code can't restart it (that convulsed).
 (define *df-glide-pose-on?* #f)
-(define *df-glide-poses* (new 'static 'boxed-array :type int32 394 27 32 46 416 56 30))
-(define *df-glide-pose* 0)
+(defconstant DF-GLIDE-POSE 394) ;; jakb art slot looped while gliding
 (define *df-glide-pose-fps* 18.0) ;; 30 looks frantic, 8-12 sluggish
 (define *df-glide-frame* 0.0)
 
@@ -2423,12 +2368,48 @@
               )
           )
     )
-  (when (!= *df-body-pitch* 0.0)
-    (let ((r (quaternion-axis-angle! (new 'stack-no-clear 'quaternion) 1.0 0.0 0.0 (degrees *df-body-pitch*))))
-      (quaternion*! (-> tq quat) r (-> tq quat))
+  (if (!= *df-body-pitch* 0.0)
+      (let ((r (quaternion-axis-angle! (new 'stack-no-clear 'quaternion) 1.0 0.0 0.0 (degrees *df-body-pitch*))))
+        (quaternion*! (-> tq quat) r (-> tq quat))
+        )
+      (if (not *dark-wings-out?*) ;; upright and done flying: take this hook off the bone again
+          (set! (-> node param0) #f)
+          )
       )
-    )
   (cspace<-parented-transformq-joint! node tq)
+  (none)
+  )
+
+(defbehavior dark-flight-fold target ()
+  "Put the wings away and undo everything flight changed: gravity, glide, camera."
+  (set! *dark-wings-out?* #f)
+  (dark-flight-glide-end)
+  (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
+  (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
+  (dark-wings-show #f)
+  (dark-flight-camera #f)
+  (set! *dark-flight-cam?* #f)
+  (none)
+  )
+
+(defbehavior dark-flight-guard target ()
+  "Every frame, whatever Jak is doing: if the wings are out but he's no longer in a state that flies
+   (dying, grabbed by a cutscene, hijacking a zoomer, on the board, in the Titan suit...), fold
+   them. Those states use their own post functions, so the landing check in target-post never runs."
+  (when (and (or *dark-wings-out?* *dark-wings-want?* *dark-flight-cam?*)
+             (or (focus-test? self dead grabbed pilot board mech)
+                 (not (focus-test? self dark))
+                 (not (member (-> self state name)
+                              '(target-jump target-double-jump target-high-jump target-falling target-attack-air
+                                target-darkjak-slam target-hit target-stance target-walk target-hit-ground target-slide-down
+                                target-duck-stance target-duck-walk)
+                              )
+                      )
+                 )
+             )
+    (set! *df-body-pitch* 0.0)
+    (dark-flight-fold)
+    )
   (none)
   )
 
@@ -2445,7 +2426,7 @@
        (set! *df-pose-launch?* (< (current-time) *df-launch-until*))
        (and *df-glide-pose-on?* *dark-wings-out?* (not *df-pose-launch?*))
        )
-     (let ((a (-> self draw art-group data (-> *df-glide-poses* *df-glide-pose*))))
+     (let ((a (-> self draw art-group data DF-GLIDE-POSE)))
        (if a
            (let ((n (the float (+ -1 (-> (the-as art-joint-anim a) frames num-frames)))))
              ;; ping-pong: forward then backward (these animations aren't loops, wrapping jumped)
@@ -2511,8 +2492,17 @@
 
 (defstate target-darkjak-slam (target)
   :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
-    ;; the dark bomb's own handler, so the blast registers hits (verified: guards, citizens, bikes)
-    ((-> target-darkjak-bomb0 event) proc argc message block)
+    (case message
+      (('swim 'attack 'attack-or-shove)
+       ;; unlike the bomb's handler (which ignores these), a slam into water swims and a slam into
+       ;; lava or dark eco hurts, like any other landing
+       (target-dangerous-event-handler proc argc message block)
+       )
+      (else
+        ;; the dark bomb's own handler, so the blast registers hits (verified: guards, citizens, bikes)
+        ((-> target-darkjak-bomb0 event) proc argc message block)
+        )
+      )
     )
   :enter (behavior ()
     (set-time! (-> self state-time))
@@ -2674,98 +2664,200 @@
 (define *df-city-districts* '(ctysluma ctyslumb ctyslumc ctygena ctygenb ctygenc ctyinda ctyindb
                               ctymarka ctymarkb ctyfarma ctyfarmb ctyport))
 
+;; A district within this far of Jak (from the edge of its bounding sphere) is never unloaded.
+(define *df-stream-keep-dist* (meters 60))
+(define *df-stream-cooldown* (seconds 2)) ;; after a load request, give the game this long before another
+(define *df-stream-last* (the-as time-frame 0))
+
+(defun df-district-at ((pos vector))
+  "The loaded district at pos: an active district whose boxes contain it (the game's own test), else
+   the nearest active district by bounding sphere. Geometric -- current-level comes from the gate
+   scripts, which flight skips over, so it can name the district Jak has already left."
+  (let ((best (the-as level #f))
+        (bestd 0.0)
+        (best-in #f)
+        )
+    (dotimes (i LEVEL_MAX)
+      (let ((lv (-> *level* level i)))
+        (when (and (= (-> lv status) 'active) (member (-> lv name) *df-city-districts*))
+          (let ((d (vector-vector-distance (-> lv bsp bsphere) pos))
+                (in (if (-> lv inside-boxes) #t #f))
+                )
+            (when (or (not best) (and in (not best-in)) (and (= in best-in) (< d bestd)))
+              (set! best lv)
+              (set! bestd d)
+              (set! best-in in)
+              )
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
+(defun df-district-near? ((name symbol) (pos vector) (dist float))
+  "Is the loaded level NAME within DIST of pos (measured from the edge of its bounding sphere)?"
+  (let ((near #f))
+    (dotimes (i LEVEL_MAX)
+      (let ((lv (-> *level* level i)))
+        (when (and (= (-> lv name) name) (or (= (-> lv status) 'active) (= (-> lv status) 'loaded)))
+          (if (< (- (vector-vector-distance (-> lv bsp bsphere) pos) (-> lv bsp bsphere w)) dist)
+              (set! near #t)
+              )
+          )
+        )
+      )
+    near
+    )
+  )
+
 (defbehavior dark-flight-city-stream target ()
   "Twice a second while flying in the city: load the district you're heading for. Haven's
    districts are walled off and loaded by trigger regions at the gates, which flying over the
    walls never crosses (you'd fly into an unloaded district and fall through it). Every
-   continue point lists the districts to load at that spot, so use the nearest one ahead."
+   continue point lists the districts to load at that spot, so use the nearest one ahead.
+   Safety rules: only districts are ever swapped (never ctywide, side levels or mission levels);
+   never the one Jak is in or near; nothing at all while a mission level is loaded; and one
+   request per couple of seconds, so the game's own gate scripts aren't fought."
   (set! *df-stream-timer* (+ *df-stream-timer* 1))
   (when (< 15 *df-stream-timer*)
     (set! *df-stream-timer* 0)
-    (let ((p (new-stack-vector0))
-          (best (the-as continue-point #f))
-          (bestd 0.0)
+    (let ((mission #f))
+      ;; a cty* level that isn't a district or ctywide is a mission level (ctykora, ctyasha, ...):
+      ;; its actors are the mission, so leave the level list alone
+      (dotimes (i LEVEL_MAX)
+        (let ((nm (-> *load-state* want i name)))
+          (if (and nm
+                   (string-prefix= "cty" (symbol->string nm))
+                   (!= nm 'ctywide)
+                   (not (member nm *df-city-districts*))
+                   )
+              (set! mission #t)
+              )
           )
-      (vector+float*! p (-> self control trans) (-> self control transv) *df-city-lookahead*)
-      (let ((lst *level-load-list*))
-        (while (not (null? lst))
-          (let ((info (-> (the-as symbol (car lst)) value)))
-            (when (and (type? info level-load-info)
-                       (string-prefix= "cty" (symbol->string (-> (the-as level-load-info info) name)))
-                       )
-              (let ((cl (-> (the-as level-load-info info) continues)))
-                (while (not (null? cl))
-                  (let* ((c (the-as continue-point (car cl)))
-                         (w0 (-> c want 0 name))
-                         )
-                    (when (and w0 (member w0 *df-city-districts*))
-                      (let* ((dx (- (-> c trans x) (-> p x)))
-                             (dz (- (-> c trans z) (-> p z)))
-                             (d (+ (* dx dx) (* dz dz)))
+        )
+      (when (not mission)
+        (let ((p (new-stack-vector0))
+              (best (the-as continue-point #f))
+              (bestd 0.0)
+              )
+          (vector+float*! p (-> self control trans) (-> self control transv) *df-city-lookahead*)
+          (let ((lst *level-load-list*))
+            (while (not (null? lst))
+              (let ((info (-> (the-as symbol (car lst)) value)))
+                (when (and (type? info level-load-info)
+                           (string-prefix= "cty" (symbol->string (-> (the-as level-load-info info) name)))
+                           )
+                  (let ((cl (-> (the-as level-load-info info) continues)))
+                    (while (not (null? cl))
+                      (let* ((c (the-as continue-point (car cl)))
+                             (w0 (-> c want 0 name))
                              )
-                        (when (or (not best) (< d bestd))
-                          (set! best c)
-                          (set! bestd d)
+                        (when (and w0 (member w0 *df-city-districts*))
+                          (let* ((dx (- (-> c trans x) (-> p x)))
+                                 (dz (- (-> c trans z) (-> p z)))
+                                 (d (+ (* dx dx) (* dz dz)))
+                                 )
+                            (when (or (not best) (< d bestd))
+                              (set! best c)
+                              (set! bestd d)
+                              )
+                            )
+                          )
+                        )
+                      (set! cl (cdr cl))
+                      )
+                    )
+                  )
+                )
+              (set! lst (cdr lst))
+              )
+            )
+          (when best
+            (let ((target (-> best want 0 name))
+                  (have #f)
+                  )
+              (dotimes (i LEVEL_MAX)
+                (if (= (-> *load-state* want i name) target)
+                    (set! have #t)
+                    )
+                )
+              (when (and (not have) (< *df-stream-cooldown* (- (current-time) *df-stream-last*)))
+                ;; swap out the farthest district that Jak isn't in or near; if there's none, don't
+                ;; add anything (adding without dropping overfills the city's level heap: crash)
+                (let ((here (df-district-at (-> self control trans)))
+                      (drop (the-as symbol #f))
+                      (dropd 0.0)
+                      )
+                  (dotimes (i LEVEL_MAX)
+                    (let ((nm (-> *load-state* want i name)))
+                      (when (and nm
+                                 (member nm *df-city-districts*)
+                                 (not (and here (= nm (-> here name))))
+                                 (not (df-district-near? nm (-> self control trans) *df-stream-keep-dist*))
+                                 )
+                        (let ((d 0.0)
+                              (ready #f) ;; still-loading districts (the one just asked for) are never dropped
+                              )
+                          (dotimes (j LEVEL_MAX)
+                            (let ((lv (-> *level* level j)))
+                              (when (and (= (-> lv name) nm) (or (= (-> lv status) 'active) (= (-> lv status) 'loaded)))
+                                (set! d (vector-vector-distance (-> lv bsp bsphere) (-> self control trans)))
+                                (set! ready #t)
+                                )
+                              )
+                            )
+                          (when (and ready (or (not drop) (< dropd d)))
+                            (set! drop nm)
+                            (set! dropd d)
+                            )
                           )
                         )
                       )
                     )
-                  (set! cl (cdr cl))
-                  )
-                )
-              )
-            )
-          (set! lst (cdr lst))
-          )
-        )
-      (when best
-        (let ((target (-> best want 0 name))
-              (have #f)
-              )
-          (dotimes (i LEVEL_MAX)
-            (if (= (-> *load-state* want i name) target)
-                (set! have #t)
-                )
-            )
-          (when (not have)
-            ;; keep everything except one level we're not standing in -- a district if there is
-            ;; one, else a side level like the garage or stadium (never ctywide / lwide*, which the
-            ;; whole city needs); add the target. Adding without dropping ran the city's level heap
-            ;; dry and crashed (garage + stadium loaded).
-            (let ((names (new 'stack-no-clear 'array 'symbol 10))
-                  (n 0)
-                  (drop (the-as symbol #f))
-                  )
-              (dotimes (i 10)
-                (set! (-> names i) #f)
-                )
-              (dotimes (pass 2)
-                (dotimes (i LEVEL_MAX)
-                  (let ((nm (-> *load-state* want i name)))
-                    (when (and nm (not drop)
-                               (!= nm 'ctywide)
-                               (!= nm (-> self current-level name))
-                               (not (string-prefix= "lwide" (symbol->string nm)))
-                               (or (= pass 1) (string-prefix= "cty" (symbol->string nm)))
-                               )
-                      (set! drop nm)
+                  (when drop
+                    (let ((names (new 'stack-no-clear 'array 'symbol 10))
+                          (n 0)
+                          )
+                      (dotimes (i 10)
+                        (set! (-> names i) #f)
+                        )
+                      (dotimes (i LEVEL_MAX)
+                        (let ((nm (-> *load-state* want i name)))
+                          (when (and nm (!= nm drop) (< n 5))
+                            (set! (-> names n) nm)
+                            (set! n (+ n 1))
+                            )
+                          )
+                        )
+                      (set! (-> names n) target)
+                      (want-levels *load-state* (the-as (pointer symbol) names))
+                      (set! *df-stream-last* (current-time))
                       )
                     )
                   )
                 )
-              (dotimes (i LEVEL_MAX)
-                (let ((nm (-> *load-state* want i name)))
-                  (when (and nm (!= nm drop) (< n 5))
-                    (set! (-> names n) nm)
-                    (set! n (+ n 1))
-                    )
-                  )
-                )
-              (set! (-> names n) target)
-              (want-levels *load-state* (the-as (pointer symbol) names))
               )
             )
-          (want-display-level *load-state* target 'display)
+          )
+        )
+      )
+    ;; show the loaded districts we want (display is normally switched on by regions at the gates,
+    ;; which flight skips: the district sat in memory undrawn and you saw a dark cliff)
+    (dotimes (i LEVEL_MAX)
+      (let ((lv (-> *level* level i)))
+        (when (and (= (-> lv status) 'loaded) (not (-> lv display?)) (member (-> lv name) *df-city-districts*))
+          (let ((wanted #f))
+            (dotimes (j LEVEL_MAX)
+              (if (= (-> *load-state* want j name) (-> lv name))
+                  (set! wanted #t)
+                  )
+              )
+            (if wanted
+                (want-display-level *load-state* (-> lv name) 'display)
+                )
+            )
           )
         )
       )
@@ -2774,7 +2866,7 @@
   )
 
 (defbehavior dark-flight-city target ()
-  "Per frame while flying: city detection, district look-ahead, per-district altitude ceiling."
+  "Per frame while flying: city detection, district streaming, per-district altitude ceiling."
   (set! *df-in-city?* (if (and (-> self current-level)
                                (or (string-prefix= "cty" (symbol->string (-> self current-level name)))
                                    (= (-> self current-level name) 'stadium) ;; the stadium's outside is city
@@ -2785,21 +2877,14 @@
                           )
         )
   (when *df-in-city?*
-    ;; Show every city district that's already loaded. Districts are displayed by trigger regions
-    ;; near their borders, which flight skips past -- the district sat in memory undrawn and you
-    ;; saw a dark cliff.
-    (dotimes (i LEVEL_MAX)
-      (let ((lv (-> *level* level i)))
-        (if (and (= (-> lv status) 'loaded)
-                 (not (-> lv display?))
-                 (string-prefix= "cty" (symbol->string (-> lv name)))
-                 )
-            (want-display-level *load-state* (-> lv name) 'display)
-            )
-        )
-      )
     (dark-flight-city-stream)
-    (let ((nm (symbol->string (-> self current-level name))))
+    ;; the ceiling of the district Jak is actually over (current-level can lag behind in flight)
+    (let ((nm (symbol->string (let ((d (df-district-at (-> self control trans))))
+                                (if d (-> d name) (-> self current-level name))
+                                )
+                              )
+              )
+          )
       (set! *df-city-ceiling* (cond
                                 ((string-prefix= "ctyport" nm) *df-ceil-port*)
                                 ((string-prefix= "ctyinda" nm) *df-ceil-inda*)
@@ -2811,9 +2896,6 @@
                                 (else *df-ceil-default*)
                                 )
             )
-      )
-    (let ((tv (-> self control transv)))
-      (set-vector! *df-region-lookahead* (* (-> tv x) *df-city-lookahead*) 0.0 (* (-> tv z) *df-city-lookahead*) 1.0)
       )
     (let ((above (- (-> self control trans y) (- *df-city-ceiling* *df-city-soft*)))
           (vs (-> self control transv y))
@@ -2831,18 +2913,16 @@
   (none)
   )
 
-;; DARK FLIGHT MOD v2: no custom state -- Jak stays in the normal jump/fall states
+;; DARK FLIGHT: no custom state -- Jak stays in the normal jump/fall states
 ;; (which already handle animation, camera and landing) and we only add lift to them.
 (defbehavior dark-flight-air target ()
-  "Dark Jak flight. TAP L1 in mid-air to beat your wings -- the first tap opens them and
-   they stay out until you land, like Light Jak's flight in Jak 3. (Requiring L1 to be HELD
-   made flight switch on and off every frame while tapping, which thrashed the wings and the
-   camera settings.)"
+  "Dark Jak flight, called from the jump/fall states' :trans. X in mid-air flaps -- the first
+   flap opens the wings and they stay out until you land, like Light Jak's flight in Jak 3."
   (cond
     ((and (focus-test? self dark)
           (not (logtest? (-> self control status) (collide-status on-surface on-ground)))
           )
-     ;; DARK FLIGHT v3 controls, same as Jak 3: X flaps, hold L1 glides, R1 turbo, Square lands.
+     ;; Controls, same as Jak 3: X flaps, hold L1 glides, R1 turbo, Square lands.
      ;; The first X after a jump is still the double jump; any X after that (or when falling, or
      ;; once flying) is a flap. The press is consumed so the jump states don't also act on it.
      (when (and (cpad-pressed? (-> self control cpad number) x)
@@ -2902,7 +2982,7 @@
         ;; never treat flight as a fall, so landing is always safe
         (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
         (set! (-> self control mod-surface)
-              ;; DARK FLIGHT v3: turbo on R1, only while flapping (within *df-turbo-window* of the
+              ;; turbo on R1, only while flapping (within *df-turbo-window* of the
               ;; last L1 tap) -- holding it through a plain fall flung Jak off. The glide has its own.
               (if (and (cpad-hold? (-> self control cpad number) r1)
                        (< (- (current-time) *df-l1-time*) *df-turbo-window*)
@@ -3094,7 +3174,7 @@
             )
           (ja-no-eval :group! (dw-anim 'rest) :num! (identity 0.0) :frame-num 0.0)
           )
-        ((< 0.0 *dark-wings-glide-rate*) ;; DARK FLIGHT v3: gliding -> keep beating, speed-scaled
+        ((< 0.0 *dark-wings-glide-rate*) ;; gliding -> keep beating, speed-scaled
          (ja-no-eval :group! (dw-anim 'glide) :num! (seek! max *dark-wings-glide-rate*) :frame-num 0.0)
          (until (or (ja-done? 0) *dark-wings-flap?*)
            (suspend)
@@ -3125,10 +3205,15 @@
                   (fmax 0.0 (- *dark-wings-grow* (/ (seconds-per-frame) *dw-fold-time*)))
                   )
               )
-        (if (or *dark-wings-want?* (< 0.001 *dark-wings-grow*))
-            (logclear! (-> self draw status) (draw-control-status no-draw no-draw-temp))
+        (cond
+          ((or *dark-wings-want?* (< 0.001 *dark-wings-grow*))
+           (logclear! (-> self draw status) (draw-control-status no-draw no-draw-temp))
+           (set! *dw-last-shown* (current-time))
+           )
+          (else
             (logior! (-> self draw status) (draw-control-status no-draw))
             )
+          )
         )
       )
     ;; ja-post, not transform-post: every build using ja-post survived, every build
@@ -3330,20 +3415,48 @@
 
 (define *dark-wings-lost* 0) ;; frames the wings have been nowhere near Jak
 
+(define *dw-wings-cache* (the-as process #f))
+
 (defun dw-live-wings ()
-  "The live wings process, or #f. Found by name every time rather than through a saved handle,
-   which could go stale (pointing at dead wings while live ones went untracked, so they were
-   killed and respawned every frame)."
-  (the-as process
-          (search-process-tree *active-pool*
-                               (lambda ((p process-tree))
-                                 (and (string= (-> p name) "dark-wings") (!= (-> (the-as process p) status) 'dead))
-                                 )
-                               )
-          )
+  "The live wings process, or #f. Found by name rather than through a saved handle, which could go
+   stale (pointing at dead wings while live ones went untracked, so they were killed and respawned
+   every frame). The last one found is cached and re-checked (name + not dead -- its slot can be
+   reused by another process), so the process tree is only searched when that fails."
+  (let ((c *dw-wings-cache*))
+    (if (and c (!= (-> c status) 'dead) (string= (-> c name) "dark-wings"))
+        c
+        (set! *dw-wings-cache*
+              (the-as process
+                      (search-process-tree *active-pool*
+                                           (lambda ((p process-tree))
+                                             (and (string= (-> p name) "dark-wings") (!= (-> (the-as process p) status) 'dead))
+                                             )
+                                           )
+                      )
+              )
+        )
+    )
   )
 
 (define *dw-killed-frame?* #f) ;; wings were removed this frame: spawn next frame, not into the same slot
+
+(defun dw-retire-folded-wings ()
+  "Remove the wings once they've been folded away for a second. They come from *16k-dead-pool*,
+   which has only two slots: Daxter holds one, and the Titan suit needs the other for its body --
+   wings left alive (just hidden) made the suit spawn without it. Spawning them again on the next
+   flight is cheap."
+  (let ((w (dw-live-wings)))
+    (when (and w
+               (not *dark-wings-want?*)
+               (>= 0.001 *dark-wings-grow*)
+               (< (seconds 1) (- (current-time) *dw-last-shown*))
+               )
+      (deactivate w)
+      (set! *dark-wings-handle* (the-as handle #f))
+      )
+    )
+  (none)
+  )
 
 (defbehavior dark-wings-show target ((want symbol))
   "Spawn a mirrored pair once, then just show/hide them."

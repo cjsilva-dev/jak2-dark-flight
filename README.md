@@ -12,7 +12,7 @@ superhero landing that sets off a Dark Bomb blast — with a choice of two sets 
 | **Hold L1** | Glide. Diving turns into forward speed, and the momentum carries |
 | **X while gliding** | Big launch upward (Jak lifts his nose into it) |
 | **R1** | Turbo — right after a flap, or on top of a glide |
-| **Square** in the air | Superhero landing: an accelerating dive ending in a Dark Bomb blast. No fall damage from any height |
+| **Square** in the air | Superhero landing: an accelerating dive (hold Square to dive harder) ending in a Dark Bomb blast. No fall damage from any height. After a moment, X, Square, Circle or the stick gets you up |
 
 The camera follows Jak's height while flying. Dark Jak doesn't time out, so you can fly for as long as
 you like.
@@ -34,6 +34,15 @@ Both are in the *Secrets* menu, and each save keeps its own choice:
   in any save that doesn't have it yet; switch it off there if you'd rather collect dark eco (each
   transformation then costs a full meter, as in the original game — the flight itself stays unlimited).
 
+### What the mod writes into your save
+
+Secrets are saved with your game, so these stay in the save file (the original game ignores them if
+you load the save without the mod):
+
+- **Unlimited Dark Jak** is marked bought and switched on the first time a save runs with the mod.
+  Switch it off in the Secrets menu if you prefer; the mod won't switch it back on.
+- **Dark Angel Wings** is marked bought (it's free) so it always shows in the menu.
+
 ## Options for testing
 
 At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
@@ -54,6 +63,11 @@ At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
   `goal_src/jak2/engine/ui/text-id-h.gc`, `game/assets/jak2/text/` — the Dark Angel Wings secret
 - `game/overlord/common/sbank.cpp` — **engine change:** one extra sound bank slot. Stock *Jak II* can hold
   six sound banks and uses all of them, so there's no room for the wings' sounds; this adds a seventh.
+
+## Building
+
+The wing models are added to the custom `test-zone` level, which makes the build decompile that
+level's art groups as well — a first build takes a little longer than the plain mod base.
 
 ## Not included
 

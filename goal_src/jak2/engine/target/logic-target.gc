@@ -2600,7 +2600,7 @@
   (none)
   )
 
-;; DARK FLIGHT v3: the airborne pose logic lives in target-darkjak.gc (dark-flight-pose) and is
+;; the airborne pose logic lives in target-darkjak.gc (dark-flight-pose) and is
 ;; called by name, so it can be hot-reloaded -- states keep their own copy of target-post itself.
 (define-extern dark-flight-pose (function none :behavior target))
 
@@ -2613,13 +2613,12 @@
          (not (focus-test? self dark)))
      ;; grounded, or no longer Dark Jak: fold everything away no matter which state
      ;; brought us here (getting hit or de-transforming mid-air skips the airborne hooks)
-     (when (or *dark-wings-out?* *dark-wings-want?*)
-       (set! *dark-wings-out?* #f)
-       (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
-       (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
-       (dark-wings-show #f)
-       (dark-flight-camera #f)
-       )
+     (if (or *dark-wings-out?* *dark-wings-want?*)
+         (dark-flight-fold)
+         )
+     )
+    ((= (-> self state name) 'target-hit)
+     ;; getting hit mid-flight: let the hit reaction play instead of holding the flight tuck
      )
     (else
      (dark-flight-pose)

@@ -8,9 +8,11 @@
 
 #include "game/runtime.h"
 
-// DARK FLIGHT: one extra level bank slot (6 -> 7), so the mod can keep one sound bank (the pegasus
-// wing sounds) loaded everywhere without taking a slot the level system needs. On PC the spu_loc/size
-// values are bookkeeping only -- snd_BankLoadEx ignores them and loads banks into their own memory.
+// DARK FLIGHT: one extra level bank slot (6 -> 7), so the mod can keep one sound bank (the wing
+// sounds: Metal Kor's NEST6 or the pegasus's FOREST2) loaded everywhere without taking a slot the
+// level system needs. Jak 2 only -- Jak 1 is kept at its stock six (see AllocateBank); Jak 3 and
+// Jak X have their own bank arrays. On PC the spu_loc/size values are bookkeeping only:
+// snd_BankLoadEx ignores them and loads banks into their own memory.
 static constexpr int N_BANKS = 7;
 
 SoundBank gCommonBank;
@@ -74,7 +76,7 @@ void InitBanks() {
     gBanks[5]->spu_loc = 0x1B6740;
     gBanks[5]->spu_size = 0x42800;
 
-    // DARK FLIGHT: the extra slot (past the PS2's SPU RAM -- unused on PC, see above)
+    // DARK FLIGHT: the extra slot (spu_loc/size unused on PC, see above)
     strncpy(gBanks[6]->name.data(), "level3", 16);
     gBanks[6]->spu_loc = 0x1F8F40;
     gBanks[6]->spu_size = 0x42800;
@@ -83,9 +85,11 @@ void InitBanks() {
 
 SoundBank* AllocateBank() {
   int idx = 0;
+  // DARK FLIGHT: Jak 1 keeps the stock six banks (the seventh slot is for Jak 2's wing sounds)
+  const int n_banks = (g_game_version == GameVersion::Jak1) ? N_BANKS - 1 : N_BANKS;
   // find a bank with unk1 = 0, or return nullptr if none exists
   while (true) {
-    if (idx >= N_BANKS) {
+    if (idx >= n_banks) {
       return nullptr;
     }
 

@@ -530,6 +530,12 @@ u32 ISOThread() {
             if (pages == (Page*)nullptr) {
             LAB_00004f28:
               SendMbx(iso_mbx, inasdf);
+              // Dark Flight fix: the command was re-queued, so it hasn't run yet. The original fell
+              // through to ReturnMessage below, which woke the waiting loader thread early -- and the
+              // command lives on that thread's stack, so the queued pointer then dangled (spurious
+              // wake-ups, or an IOP assert on a garbage thread id). Jak 1's overlord breaks here too.
+              gSoundInUse = gSoundInUse + -1;
+              goto LAB_00005144;
             } else {
               SetBufferMem(pages->buffer, SpMemoryBuffers->page_size);
               // iVar4 = inasdf->maybe_offset;
