@@ -1622,10 +1622,22 @@
     (dark-flight-air) ;; DARK FLIGHT MOD
     (target-falling-trans
       (the-as symbol (-> self control unknown-spool-anim00))
-      (the-as time-frame (if (= (-> self control unknown-spool-anim00) #f)
-                             0
+      ;; DARK FLIGHT MOD: no "stuck" check while flying free. Hovering barely moves Jak, which the
+      ;; check took for being wedged: it forced a landing in mid-air and he dropped. (Still checked
+      ;; when he's touching a wall or a surface, or not flying.)
+      (the-as time-frame (cond
+                           ((and *dark-wings-out?*
+                                 (not (logtest? (-> self control status) (collide-status touch-surface touch-wall)))
+                                 )
+                            -1
+                            )
+                           ((= (-> self control unknown-spool-anim00) #f)
+                            0
+                            )
+                           (else
                              (the-as int (/ (the-as int (-> *TARGET-bank* stuck-time)) 2))
                              )
+                           )
               )
       )
     )

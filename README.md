@@ -1,22 +1,25 @@
 # Dark Flight — Jak II
 
 **Dark Jak grows wings and flies.** An [OpenGOAL](https://opengoal.dev) mod for *Jak II* that gives Dark
-Jak the full flight of Jak 3's True Flight mod: stacking wing flaps, a momentum glide, a turbo, and a
-superhero landing that sets off a Dark Bomb blast — with a choice of two sets of wings.
+Jak full flight — the same as Dark Jak's flight in Jak 3's True Flight mod: hard, driving wing flaps, a
+momentum glide, a turbo, a lightning dash attack, and a superhero landing that sets off a Dark Bomb
+blast — with a choice of two sets of wings.
 
 ## Controls (as Dark Jak)
 
 | Input | Action |
 |---|---|
-| **X** in the air | The first X after a jump is still the double jump; after that, each X unfurls the wings and flaps. Every flap stacks more height; **hold X** through a flap for extra lift. Stop flapping and the fall picks up weight |
+| **X** in the air | The first X after a jump is still the double jump; after that, each X unfurls the wings and flaps. Every flap throws him up and forward; **hold X** through a flap for extra lift |
 | **Hold L1** | Glide. Diving turns into forward speed, and the momentum carries |
 | **X while gliding** | Big launch upward (Jak lifts his nose into it) |
-| **R1** | Turbo — right after a flap, or on top of a glide |
+| **Tap R1** | Dash attack: a lunge forward in a storm of lightning and sparks that hits whatever he flies through |
+| **Hold R1** | Turbo — right after a flap, or on top of a glide |
 | **R3** (click the right stick) | Switch wings: Metal Head ⇄ Dark Angel (as Dark Jak, on the ground or in the air) |
 | **Square** in the air | Superhero landing: an accelerating dive (hold Square to dive harder) ending in a Dark Bomb blast. No fall damage from any height. After a moment, X, Square, Circle or the stick gets you up |
 
 The camera follows Jak's height while flying. Dark Jak doesn't time out, so you can fly for as long as
-you like.
+you like. Shot while flying, he flinches in the air and flies on, and there's no fall damage after
+flying, from any height.
 
 ### In Haven City
 
@@ -64,6 +67,9 @@ At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
   `goal_src/jak2/engine/ui/text-id-h.gc`, `game/assets/jak2/text/` — the Dark Angel Wings secret
 - `game/overlord/common/sbank.cpp` — **engine change:** one extra sound bank slot. Stock *Jak II* can hold
   six sound banks and uses all of them, so there's no room for the wings' sounds; this adds a seventh.
+- `decompiler/level_extractor/extract_merc.cpp` — **build-tool change:** Metal Kor's wings are drawn like
+  water (in his boss arena that works), which let the ocean show through them at the Port; they now
+  keep their depth when built into the custom level.
 
 ## Building
 
