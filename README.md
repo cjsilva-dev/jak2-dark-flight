@@ -12,6 +12,7 @@ superhero landing that sets off a Dark Bomb blast — with a choice of two sets 
 | **Hold L1** | Glide. Diving turns into forward speed, and the momentum carries |
 | **X while gliding** | Big launch upward (Jak lifts his nose into it) |
 | **R1** | Turbo — right after a flap, or on top of a glide |
+| **R3** (click the right stick) | Switch wings: Metal Head ⇄ Dark Angel (as Dark Jak, on the ground or in the air) |
 | **Square** in the air | Superhero landing: an accelerating dive (hold Square to dive harder) ending in a Dark Bomb blast. No fall damage from any height. After a moment, X, Square, Circle or the stick gets you up |
 
 The camera follows Jak's height while flying. Dark Jak doesn't time out, so you can fly for as long as
@@ -27,7 +28,7 @@ loaded and shown ahead of you as you fly — including over the walls between th
 
 Both are in the *Secrets* menu, and each save keeps its own choice:
 
-- **Dark Angel Wings** — off: **Metal Head** wings (Metal Kor's, with his wing-beat and hover sounds;
+- **Dark Angel Wings** (also switched with **R3** as Dark Jak) — off: **Metal Head** wings (Metal Kor's, with his wing-beat and hover sounds;
   the default). On: **Dark Angel** wings (the bat wings of the pegasus that flies through Haven Forest,
   with its sounds). Free, and always in the menu.
 - **Unlimited Dark Jak** — the game's own item (endless dark eco). The mod unlocks it and switches it **on**

@@ -117,6 +117,15 @@
   ;; DARK FLIGHT: the wing style is a Secrets-menu item, "Dark Angel Wings" (off = Metal Head), so
   ;; each save keeps its own. It comes bought (free) so it's always in the menu.
   (logior! (-> *game-info* purchase-secrets) (game-secrets dark-angel-wings))
+  ;; R3 as Dark Jak switches wings (R3 is first-person look, which the game turns off while Dark;
+  ;; L3+R3 is left alone for the PC subtitle tool). Same bit as the Secrets item, so they agree.
+  (when (and (focus-test? self dark)
+             (cpad-pressed? (-> self control cpad number) r3)
+             (not (cpad-hold? (-> self control cpad number) l3))
+             (not *pause-lock*)
+             )
+    (logxor! (-> self game secrets) (game-secrets dark-angel-wings))
+    )
   (set! *df-wings-style* (if (logtest? (-> self game secrets) (game-secrets dark-angel-wings)) 'dark-angel 'metal-head))
   (df-sfx-bank) ;; the wing style's sounds, from the player's game files
   (dark-flight-guard) ;; wings out but no longer flying (died, grabbed, hijacked a zoomer...): fold them
