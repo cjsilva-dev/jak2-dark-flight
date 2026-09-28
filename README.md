@@ -80,7 +80,6 @@ it; install your favourite pack through the OpenGOAL launcher as usual.
 
 - Built on the [OG-Mod-Base](https://github.com/OpenGOAL-Mods/OG-Mod-Base) template and the
   [OpenGOAL](https://github.com/open-goal/jak-project) project.
-- Made with AI coding assistance (Claude), directed and play-tested by the author.
 - *Jak II* © Naughty Dog / Sony Interactive Entertainment. This is a fan project.
 
 The mod base's own readme (with OpenGOAL setup links) is kept in [README.opengoal.md](README.opengoal.md).
