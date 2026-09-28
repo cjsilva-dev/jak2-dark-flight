@@ -969,6 +969,13 @@ ConvertedMercEffect convert_merc_effect(const MercEffect& input_effect,
       use_alpha_blend = false;
     }
 
+    // Dark Flight mod: Metal Kor's wings (worn by Dark Jak) are water-bucket effects (texture index
+    // 4), which bakes depth writes off. That's fine on Kor at the bottom of the nest, but over the
+    // ocean the water drew straight through them. Keep their blending, but write depth.
+    if (debug_name == "metalkor-wings-lod0") {
+      depth_write = true;
+    }
+
     handle_frag(debug_name, ctrl_header, frag, frag_ctrl, merc_state, result.vertices,
                 merc_memories[memory_buffer_toggle], can_be_modified, combined_lump4_addr, fi);
     u32 vert_count = frag.lump4_unpacked.size() / 3;

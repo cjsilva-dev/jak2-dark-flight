@@ -1919,12 +1919,12 @@
 
 (define *darkjak-fly-mods* (new 'static 'surface
                              :name 'darkjak-fly
-                             :turnv 131072.0
+                             :turnv 163840.0 ;; 26 m/s, sharp turns (as Jak 3's Dark Jak)
                              :turnvv 18204.445
                              :tiltv 32768.0
                              :tiltvv 262144.0
-                             :transv-max 81920.0
-                             :target-speed 81920.0
+                             :transv-max 106496.0
+                             :target-speed 106496.0
                              :seek0 0.3
                              :seek90 0.3
                              :seek180 0.3
@@ -1975,8 +1975,6 @@
                              )
         )
 
-(defconstant DF-FLAP-IMPULSE (meters 12))
-(defconstant DF-CLIMB-CAP    (meters 20))
 (defconstant DF-GRAVITY      81920.0)
 (defconstant DF-GRAVITY-MAX  163840.0)
 
@@ -2116,7 +2114,11 @@
 
 (define *df-flap-from-glide?* #f) ;; set per tap in dark-flight-air
 ;; Jak 3 parity: flaps are at least this far apart, and holding X through a flap keeps lifting
-(define *df-flap-cooldown*    (seconds 0.35))
+;; fewer, harder flaps that throw him forward (the same feel as Dark Jak's flight in Jak 3)
+(define *df-flap-impulse*     (meters 17))  ;; per flap
+(define *df-climb-cap*        (meters 24))  
+(define *df-flap-surge*       (meters 10))  ;; forward throw per flap
+(define *df-flap-cooldown*    (seconds 0.5)) 
 (define *df-flap-hold-bonus*  (meters 10))  ;; most extra climb a fully held flap adds, m/s
 (define *df-flap-hold-accel*  (meters 25))  ;; how fast holding adds it (10/25 = 0.4 s)
 (define *df-flap-holding?* #f)
@@ -2130,7 +2132,7 @@
          )
     (if *df-flap-from-glide?* ;; flapping out of a glide is a big launch
         (fmin *df-big-flap-cap* (+ *df-big-flap-impulse* (fmax 0.0 vspeed)))
-        (fmin DF-CLIMB-CAP (+ DF-FLAP-IMPULSE (fmax 0.0 vspeed)))
+        (fmin *df-climb-cap* (+ *df-flap-impulse* (fmax 0.0 vspeed)))
         )
     )
   )
@@ -2162,6 +2164,12 @@
       (vector-float*! (-> self control transv) (-> self control dynam gravity-normal) (dark-flight-flap-speed))
       v1-0
       )
+    )
+  ;; the forward surge
+  (let ((fwd (vector-z-quaternion! (new-stack-vector0) (-> self control quat-for-control))))
+    (set! (-> fwd y) 0.0)
+    (vector-normalize! fwd 1.0)
+    (vector+float*! (-> self control transv) (-> self control transv) fwd *df-flap-surge*)
     )
   (none)
   )
@@ -2206,8 +2214,8 @@
 ;;   hold L1  glide (X while gliding = big launch)
 ;;   R1       turbo (90 m/s, right after a flap or while gliding)    Square  superhero landing
 ;; Tuning values are globals so they can be changed live from the REPL.
-(define *df-glide-sink*        (meters 3))
-(define *df-glide-cruise*      (meters 18))
+(define *df-glide-sink*        (meters 5))   ;; (as Jak 3's Dark Jak)
+(define *df-glide-cruise*      (meters 22))
 (define *df-glide-max*         (meters 45))
 (define *df-glide-accel*       (meters 10))
 (define *df-glide-turbo-accel* (meters 25))  ;; in the city
@@ -2221,10 +2229,8 @@
 (define *df-glide-gravity*     49152.0)
 (define *df-glide-hold*        (seconds 0.25)) ;; how long L1 must stay held after a tap to glide
 (define *df-turbo-window*      (seconds 0.5))  ;; R1 turbo lasts this long after each flap (1.2 s flung Jak on after the last flap)
-(define *df-drop-delay*        (seconds 0.5))  ;; after this long without flapping, the fall picks up weight...
-(define *df-drop-ramp*         1.0)            ;; ...ramping over this many seconds...
-(define *df-drop-gravity*      (meters 60))    ;; ...up to this gravity (flight gravity is 20 m/s^2)
-(define *df-drop-max*          (meters 55))    ;; ...and this top fall speed (flight caps at 40 m/s)
+(define *df-gravity*           110592.0)       ;; ~27 m/s^2 while flying (as Jak 3's Dark Jak)
+(define *df-safe-fall?*        #f)             ;; flew since last standing on something: no fall damage
 (define *df-fly-turbo-accel*   (meters 25))    ;; flapping turbo in the city: driven directly (the
 (define *df-fly-turbo-max*     (meters 45))    ;; surface's own easing only reached ~25 m/s)
 (define *df-fly-turbo-accel-open* (meters 40)) ;; ... and outside the city
@@ -2247,7 +2253,7 @@
 
 (define *df-glide-mods* (new 'static 'surface
                              :name 'darkjak-glide
-                             :turnv 65536.0
+                             :turnv 98304.0 ;; cuts sharp (as Jak 3's Dark Jak)
                              :turnvv 18204.445
                              :tiltv 32768.0
                              :tiltvv 262144.0
@@ -2441,6 +2447,15 @@
    their own post functions, so the landing check in target-post never runs for them. This is a
    list of states to fold in, not of states to fly in: Jak has many airborne states (ledge jumps,
    pole flips, roll flips...), and folding in every one not listed broke flying after a ledge."
+  ;; no fall damage between a flight and the next landing, even if the wings were folded mid-air
+  (cond
+    ((logtest? (-> self control status) (collide-status on-surface on-ground))
+     (set! *df-safe-fall?* #f)
+     )
+    (*df-safe-fall?*
+      (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
+      )
+    )
   (when (and (or *dark-wings-out?* *dark-wings-want?* *dark-flight-cam?*)
              (or (focus-test? self dead grabbed pilot board mech)
                  (not (focus-test? self dark))
@@ -2956,6 +2971,113 @@
 
 ;; DARK FLIGHT: no custom state -- Jak stays in the normal jump/fall states
 ;; (which already handle animation, camera and landing) and we only add lift to them.
+;; ---- R1 dash (as Jak 3's Dark Jak): tap R1 while flying = a level lunge forward in a streak of
+;; dark sparks and lightning, with a small dark-bomb hit sphere, rumble and a camera jolt. Holding
+;; R1 still boosts as before.
+(define *df-dash-speed*    (meters 55))
+(define *df-dash-city-speed* (meters 45)) ;; in the city (the districts can't stream faster)
+(define *df-dash-time*     (seconds 0.3))
+(define *df-dash-cooldown* (seconds 0.6))
+(define *df-dash-start*    (the-as time-frame 0))
+(define *df-dashing?*      #f)
+(define *df-dash-scale*    0.07) ;; hit sphere, as a share of the dark bomb's size
+;; no steering or drag while it lasts (the normal air control pulls a lunge straight back)
+(define *df-dash-mods* (let ((m (copy *darkjak-fly-fast-mods* 'global)))
+                         (set! (-> m name) 'darkjak-dash)
+                         (set! (-> m seek0) 0.0)
+                         (set! (-> m seek90) 0.0)
+                         (set! (-> m seek180) 0.0)
+                         (set! (-> m fric) 0.0)
+                         m
+                         )
+  )
+
+(defbehavior df-dash-bolt target ()
+  "One lightning bolt from a point on Jak's body to a point in the air 1.5-4 m behind him. The far
+   end stays where it was put, so as he lunges on the bolt stretches out behind him. (The game's
+   own shock effect only draws a bolt when a probe hits a wall or the ground nearby.)"
+  (let ((j (rand-vu-int-range 3 (/ (+ (-> self node-list length) -1) 2)))
+        (end (new 'stack-no-clear 'vector))
+        (fwd (vector-z-quaternion! (new-stack-vector0) (-> self control quat-for-control)))
+        )
+    (vector<-cspace! end (-> self node-list data j))
+    (vector+float*! end end fwd (- (rand-vu-float-range (meters 1.5) (meters 4))))
+    (+! (-> end x) (rand-vu-float-range (meters -1.5) (meters 1.5)))
+    (+! (-> end y) (rand-vu-float-range (meters -1.5) (meters 1.5)))
+    (+! (-> end z) (rand-vu-float-range (meters -1.5) (meters 1.5)))
+    (let ((pt (get-process *default-dead-pool* lightning-tracker #x4000)))
+      (when pt
+        ((method-of-type lightning-tracker activate)
+         (the-as lightning-tracker pt) self (symbol->string (-> lightning-tracker symbol)) (the-as pointer #x70004000)
+         )
+        ((the-as (function object object object object object object object object none) run-function-in-process)
+         pt lightning-tracker-init (-> *lightning-spec-id-table* 6) 0 lightning-probe-callback self j end
+         )
+        (set! (-> (the-as lightning-tracker pt) user-time 0) 0) ;; (the recolor counter, as the game does)
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior dark-flight-dash target ()
+  "Per frame with the wings out: start a dash on an R1 tap, drive it while it lasts."
+  (set! *df-dashing?* (not (time-elapsed? *df-dash-start* *df-dash-time*)))
+  (when (and (cpad-pressed? (-> self control cpad number) r1)
+             (time-elapsed? *df-dash-start* *df-dash-cooldown*)
+             )
+    (set-time! *df-dash-start*)
+    (set! *df-dashing?* #t)
+    (target-start-attack) ;; a fresh attack, so everything can be hit again
+    (df-sfx 'glide)
+    (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 180 (seconds 0.15))
+    (activate! *camera-smush-control* 300.0 15 30 1.0 0.9 (-> *display* camera-clock))
+    ;; a crackle of lightning (no smoke or glow: those read as a cloud left behind, not a boost)
+    (dotimes (i 5)
+      (df-dash-bolt)
+      )
+    (if *df-gliding?* ;; the glide carries its own speed: give it the lunge (it bleeds off as momentum)
+        (set! *df-glide-speed* (fmax *df-glide-speed* (if *df-in-city?* *df-dash-city-speed* *df-dash-speed*)))
+        )
+    )
+  (when *df-dashing?*
+    (when (not *df-gliding?*)
+      (let ((fwd (vector-z-quaternion! (new-stack-vector0) (-> self control quat-for-control))))
+        (set! (-> fwd y) 0.0)
+        (vector-normalize! fwd (if *df-in-city?* *df-dash-city-speed* *df-dash-speed*))
+        (set! (-> self control transv x) (-> fwd x))
+        (set! (-> self control transv z) (-> fwd z))
+        (set! (-> self control transv y) (fmax 0.0 (-> self control transv y))) ;; a level lunge
+        )
+      (set! (-> self control mod-surface) *df-dash-mods*)
+      )
+    ;; all electricity: Dark Jak's lightning arcing off him every frame, arcs jumping to walls and
+    ;; enemies nearby (his near-enemy crackle), and a shower of hot sparks -- no smoke or glow
+    (dotimes (i 3) ;; bolts trailing off him into the open air
+      (df-dash-bolt)
+      )
+    (dotimes (i 10)
+      (launch-particles (-> *part-id-table* 178) (process-drawable-random-point! self (new 'stack-no-clear 'vector)))
+      )
+    ;; the hit
+    (let ((prev (-> self control danger-mode)))
+      (set! (-> self control bomb-scale) *df-dash-scale*)
+      (target-danger-set! 'bomb #f)
+      (update-transforms (-> self control))
+      (let ((a1 (new 'stack-no-clear 'overlaps-others-params)))
+        (set! (-> a1 options) (overlaps-others-options))
+        (set! (-> a1 collide-with-filter) (the-as collide-spec -1))
+        (set! (-> a1 tlist) *touching-list*)
+        (find-overlapping-shapes (-> self control) a1)
+        )
+      (set! (-> self control bomb-scale) 0.0)
+      (target-danger-set! prev #f)
+      (update-transforms (-> self control))
+      )
+    )
+  (none)
+  )
+
 (defbehavior dark-flight-air target ()
   "Dark Jak flight, called from the jump/fall states' :trans. X in mid-air flaps -- the first
    flap opens the wings and they stay out until you land, like Light Jak's flight in Jak 3."
@@ -2991,7 +3113,7 @@
                (vs (vector-dot up (-> self control transv)))
                (dv (fmin (- *df-flap-hold-bonus* *df-flap-hold-given*) (* *df-flap-hold-accel* (seconds-per-frame))))
                )
-          (set! dv (fmax 0.0 (fmin dv (- (+ DF-CLIMB-CAP *df-flap-hold-bonus*) vs))))
+          (set! dv (fmax 0.0 (fmin dv (- (+ *df-climb-cap* *df-flap-hold-bonus*) vs))))
           (if (and *df-in-city?* (< 0.0 *df-city-ceiling*)) ;; not through the city ceiling
               (set! dv (fmin dv (fmax 0.0 (* 2.0 (- *df-city-ceiling* (-> self control trans y)))))))
           (set! *df-flap-hold-given* (+ *df-flap-hold-given* dv))
@@ -3009,17 +3131,10 @@
          )
      (cond
        (*dark-wings-out?*
-        ;; floaty while flapping; once you stop, the fall picks up weight instead of drifting down
-        (let ((k (fmax 0.0 (fmin 1.0 (/ (* 0.0033333334 (the float (- (- (current-time) *df-l1-time*) *df-drop-delay*)))
-                                        *df-drop-ramp*
-                                        )
-                                 )
-                         )
-                 )
-              )
-          (set! (-> self control dynam gravity-length) (lerp DF-GRAVITY *df-drop-gravity* k))
-          (set! (-> self control dynam gravity-max) (lerp DF-GRAVITY-MAX *df-drop-max* k))
-          )
+        ;; a steady weight, heavier than Light Jak's flight (no extra drop after flapping stops)
+        (set! (-> self control dynam gravity-length) *df-gravity*)
+        (set! (-> self control dynam gravity-max) DF-GRAVITY-MAX)
+        (set! *df-safe-fall?* #t) ;; no fall damage until he next stands on something
         ;; never treat flight as a fall, so landing is always safe
         (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
         (set! (-> self control mod-surface)
@@ -3036,6 +3151,7 @@
         (dark-flight-camera #t)
         (set! *dark-flight-cam?* #t)
         (dark-flight-city)
+        (dark-flight-dash) ;; R1 tap
         ;; flapping turbo: accelerate along Jak's facing, like the glide turbo
         (when (and (cpad-hold? (-> self control cpad number) r1)
                    (< (- (current-time) *df-l1-time*) *df-turbo-window*)
@@ -3503,8 +3619,9 @@
   "Spawn a mirrored pair once, then just show/hide them."
   (cond
     ((and want (not *dark-wings-want?*))
-     ;; unfurling: sound, one spreading flap, a burst of dark eco at his back
+     ;; unfurling: sound, one spreading flap, a burst of dark eco at his back, a jolt
      (df-sfx 'flap)
+     (activate! *camera-smush-control* 500.0 15 45 1.0 0.9 (-> *display* camera-clock))
      (set! *dark-wings-flap?* #t)
      (when (<= 0 *dw-burst-part*)
        (let ((pt (get-process *default-dead-pool* part-tracker #x4000)))
