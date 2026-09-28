@@ -2393,18 +2393,30 @@
   )
 
 (defbehavior dark-flight-guard target ()
-  "Every frame, whatever Jak is doing: if the wings are out but he's no longer in a state that flies
-   (dying, grabbed by a cutscene, hijacking a zoomer, on the board, in the Titan suit...), fold
-   them. Those states use their own post functions, so the landing check in target-post never runs."
+  "Every frame, whatever Jak is doing: if the wings are out but he's somewhere they can't be
+   (dying, grabbed by a cutscene, hijacking a zoomer, on the board or in the Titan suit, hanging
+   from a ledge or pole, swimming, carrying something...), fold them. Most of those states use
+   their own post functions, so the landing check in target-post never runs for them. This is a
+   list of states to fold in, not of states to fly in: Jak has many airborne states (ledge jumps,
+   pole flips, roll flips...), and folding in every one not listed broke flying after a ledge."
   (when (and (or *dark-wings-out?* *dark-wings-want?* *dark-flight-cam?*)
              (or (focus-test? self dead grabbed pilot board mech)
                  (not (focus-test? self dark))
-                 (not (member (-> self state name)
-                              '(target-jump target-double-jump target-high-jump target-falling target-attack-air
-                                target-darkjak-slam target-hit target-stance target-walk target-hit-ground target-slide-down
-                                target-duck-stance target-duck-walk)
-                              )
-                      )
+                 (let ((nm (symbol->string (-> self state name))))
+                   (or (string-prefix= "target-swim" nm)
+                       (string-prefix= "target-wade" nm)
+                       (string-prefix= "target-carry" nm)
+                       (string-prefix= "target-tube" nm)
+                       (string-prefix= "target-mech" nm)
+                       (string-prefix= "target-board" nm)
+                       (string-prefix= "target-pilot" nm)
+                       (member (-> self state name)
+                               '(target-edge-grab target-pole-cycle target-grab target-death target-continue
+                                 target-hide target-launch target-play-anim target-clone-anim target-float
+                                 target-load-wait target-darkjak-get-off target-turret-get-off)
+                               )
+                       )
+                   )
                  )
              )
     (set! *df-body-pitch* 0.0)
