@@ -2392,6 +2392,40 @@
   (none)
   )
 
+(define *df-hit-frames* 0)   ;; frames spent in target-hit with the wings out
+(define *df-hit-stagger* 18) ;; frames of in-air flinch before flying on (~0.3 s)
+
+(defbehavior dark-flight-hit-trans target ()
+  "From target-hit's :trans. Shot while flying: Jak flinches in the air with his wings out instead
+   of dropping, then flies on. (In target-hit he can't flap, so with flight gravity he only drifted
+   down, frozen in the hit pose, until he landed.) The frame count lets the state's :code apply
+   the damage -- and go to target-death if it's fatal -- before we leave."
+  (cond
+    ((and *dark-wings-out?*
+          (focus-test? self dark)
+          (not (focus-test? self dead))
+          (not (logtest? (-> self control status) (collide-status on-surface on-ground)))
+          )
+     (set! *df-hit-frames* (+ *df-hit-frames* 1))
+     (let* ((up (-> self control dynam gravity-normal))
+            (vs (vector-dot up (-> self control transv)))
+            )
+       (if (< vs 0.0) ;; hang in the air through the flinch
+           (vector+float*! (-> self control transv) (-> self control transv) up (- vs))
+           )
+       )
+     (when (< *df-hit-stagger* *df-hit-frames*)
+       (set! *df-hit-frames* 0)
+       (go target-falling #f)
+       )
+     )
+    (else
+      (set! *df-hit-frames* 0)
+      )
+    )
+  (none)
+  )
+
 (defbehavior dark-flight-guard target ()
   "Every frame, whatever Jak is doing: if the wings are out but he's somewhere they can't be
    (dying, grabbed by a cutscene, hijacking a zoomer, on the board or in the Titan suit, hanging

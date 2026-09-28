@@ -101,6 +101,7 @@
 (define-extern dark-wings-show (function symbol none :behavior target)) ;; DARK FLIGHT MOD
 (define-extern dark-flight-camera (function symbol none :behavior target)) ;; DARK FLIGHT MOD
 (define-extern dark-flight-fold (function none :behavior target)) ;; DARK FLIGHT MOD
+(define-extern dark-flight-hit-trans (function none :behavior target)) ;; DARK FLIGHT MOD
 (define-extern target-gun-init (function pickup-type none :behavior target))
 (define-extern *hit-ground-hard-mods* surface)
 (define-extern *float-mods* surface)

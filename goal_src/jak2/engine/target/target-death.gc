@@ -914,6 +914,7 @@
     (target-exit)
     )
   :trans (behavior ()
+    (dark-flight-hit-trans) ;; DARK FLIGHT MOD: shot while flying, flinch in the air
     (when (= *cheat-mode* 'debug)
       (when (and (not *pause-lock*) (cpad-hold? (-> self control cpad number) r2))
         (set-time! (-> self control time-of-last-debug-heal))
