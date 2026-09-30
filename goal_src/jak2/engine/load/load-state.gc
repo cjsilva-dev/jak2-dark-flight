@@ -66,6 +66,11 @@
       )
     (label cfg-19)
     )
+  (dotimes (i LEVEL_MAX)
+    (if (-> this want i name)
+        (df-lvl-log "want" (-> this want i name) (-> this want i display?) #f)
+        )
+    )
   (add-borrow-levels this)
   0
   )

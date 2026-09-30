@@ -11,6 +11,20 @@
 ;; total amount of levels, including ones outside level heap (default-level)
 (defconstant LEVEL_TOTAL 7)
 
+;; DARK FLIGHT: streaming log. One line per level event, with the frame counter and a
+;; millisecond clock, so a level load can be timed stage by stage from the game log.
+(define *df-stream-log?* #t)
+(defun df-lvl-log ((ev string) (name symbol) (a symbol) (b symbol))
+  (if *df-stream-log?*
+      (format 0 "LVL ~D ~D ~S ~A ~A ~A~%"
+              (-> *display* real-clock frame-counter)
+              (/ (the int (get-cpu-clock)) 300000)
+              ev name a b)
+      )
+  (none)
+  )
+
+
 (declare-type bsp-header basic)
 (declare-type drawable basic)
 (declare-type entity-links structure)

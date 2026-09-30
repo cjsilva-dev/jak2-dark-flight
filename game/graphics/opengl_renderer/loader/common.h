@@ -35,7 +35,7 @@ struct LevelData {
   int frames_since_last_used = 0;
 
   // load timing (logged so streaming can be measured)
-  Timer init_timer;
+  Timer init_timer = Timer();
   int init_frames = 0;
   int last_stage_done = -1;
   bool first_use_logged = false;
