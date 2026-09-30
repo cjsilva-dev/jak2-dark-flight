@@ -864,7 +864,7 @@
 
     ; ;; LOAD LEVEL
     (if (-> *level* loading-level)
-        (load-continue (-> *level* loading-level))
+        (load-continue-pc (-> *level* loading-level))
         )
     (runs-every-frame) ;;mod-base-change
 
@@ -907,7 +907,7 @@
 
     ;; continue loading level
     (if (-> *level* loading-level)
-        (load-continue (-> *level* loading-level))
+        (load-continue-pc (-> *level* loading-level))
         )
 
     ;; drawing - this runs foreground/background drawing.
@@ -917,7 +917,7 @@
 
     ;; another level load
     (if (-> *level* loading-level)
-        (load-continue (-> *level* loading-level))
+        (load-continue-pc (-> *level* loading-level))
         )
 
     ; (if *display-color-bars*

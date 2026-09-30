@@ -726,6 +726,26 @@ into 7 sections, which might explain the weird sizes in the center.
   this
   )
 
+;; DARK FLIGHT: on PC a DGO object arrives every time load-continue is called, but the game only
+;; calls it a few times a frame, so a district's 10-15 objects took 10-15 frames. Keep calling
+;; while the DGO is still coming, within a small time budget per call site.
+(define *df-load-budget-ms* 2.5)
+(defun load-continue-pc ((lev level))
+  (load-continue lev)
+  (when (and (< 0.0 *df-load-budget-ms*) (!= lev (-> *level* default-level)))
+    (let ((start (the int (get-cpu-clock)))
+          (limit (the int (* 300000.0 *df-load-budget-ms*)))
+          )
+      (while (and (or (= (-> lev status) 'loading) (= (-> lev status) 'loading-bt))
+                  (< (- (the int (get-cpu-clock)) start) limit)
+                  )
+        (load-continue lev)
+        )
+      )
+    )
+  lev
+  )
+
 (defmethod load-begin ((this level))
   "Begin loading a level.
    This assigns memory to a level and is somewhat confusing."
@@ -2705,7 +2725,7 @@ into 7 sections, which might explain the weird sizes in the center.
   (update *art-control* #t)
   (clear-rec *art-control*)
   (dotimes (s5-0 LEVEL_MAX)
-    (load-continue (-> this level s5-0))
+    (load-continue-pc (-> this level s5-0))
     )
   (dotimes (s5-1 (-> this length))
     (let ((s4-0 (-> this level s5-1)))
@@ -2997,6 +3017,34 @@ into 7 sections, which might explain the weird sizes in the center.
         (when (and (not placed) (string= (-> lev-names i) "none"))
           (set! (-> lev-names i) "test-zone")
           (set! placed #t)
+          )
+        )
+      )
+    ;; DARK FLIGHT MOD: the renderer used to hear about a level only once its DGO had loaded and
+    ;; logged in, then read and uploaded the level's .fr3 after that. Name every wanted level
+    ;; too, so the .fr3 streams in while the DGO is still loading (or queued behind another).
+    (dotimes (w LEVEL_MAX)
+      (let ((nm (-> *load-state* want w name)))
+        (when nm
+          (let ((s (symbol->string nm))
+                (have #f)
+                )
+            (dotimes (i LEVEL_MAX)
+              (if (string= (-> lev-names i) s)
+                  (set! have #t)
+                  )
+              )
+            (when (not have)
+              (let ((placed #f))
+                (dotimes (i LEVEL_MAX)
+                  (when (and (not placed) (string= (-> lev-names i) "none"))
+                    (set! (-> lev-names i) s)
+                    (set! placed #t)
+                    )
+                  )
+                )
+              )
+            )
           )
         )
       )

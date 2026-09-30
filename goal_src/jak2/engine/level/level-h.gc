@@ -13,7 +13,12 @@
 
 ;; DARK FLIGHT: streaming log. One line per level event, with the frame counter and a
 ;; millisecond clock, so a level load can be timed stage by stage from the game log.
-(define *df-stream-log?* #t)
+(define *df-stream-log?* #f)
+;; While flying in the city the flight code owns the district wants (target-darkjak.gc). Every
+;; want-levels call (the gate trigger regions) runs this hook afterwards, so the districts are
+;; re-decided in the same frame instead of thrashing against the regions.
+(define *df-want-levels-hook* (the-as (function none) #f))
+(define *df-in-want-hook?* #f)
 (defun df-lvl-log ((ev string) (name symbol) (a symbol) (b symbol))
   (if *df-stream-log?*
       (format 0 "LVL ~D ~D ~S ~A ~A ~A~%"

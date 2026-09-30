@@ -72,6 +72,11 @@
         )
     )
   (add-borrow-levels this)
+  (when (and *df-want-levels-hook* (not *df-in-want-hook?*))
+    (set! *df-in-want-hook?* #t)
+    (*df-want-levels-hook*)
+    (set! *df-in-want-hook?* #f)
+    )
   0
   )
 
