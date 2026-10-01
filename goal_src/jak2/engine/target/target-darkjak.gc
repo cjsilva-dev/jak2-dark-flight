@@ -2727,40 +2727,46 @@
   )
 
 (define *df-stream-timer* 0)
-;; Every real Haven district (each has its own DGO: CTA-C, CGA-C, CIA/B, CMA/B, CFA/B, CPO, CPA).
-;; ctyfence has continue points but no file -- asking for it hangs or crashes -- and the mission
-;; levels (ctykora, ctyasha) stay out too.
+;; Haven's districts (for the ceilings and the city speed caps; the streamer itself is generic).
 (define *df-city-districts* '(ctysluma ctyslumb ctyslumc ctygena ctygenb ctygenc ctyinda ctyindb
                               ctymarka ctymarkb ctyfarma ctyfarmb ctyport ctypal))
 
 ;; The region look-ahead (region.gc) makes the gate scripts fire a little early for interiors.
-(define *df-region-ahead* 1.0)          ;; seconds of flight the region triggers see ahead...
+(define *df-region-ahead* 1.0)             ;; seconds of flight the region triggers see ahead...
 (define *df-region-ahead-max* (meters 30)) ;; ...capped (it moves every region's trigger point)
 
-;; ---- DISTRICT STREAMING ----
-;; Haven keeps ctywide plus two districts in the level heap (that's all it holds), swapped by
-;; trigger regions at the street-level gates. Flying over the walls never crosses those, so while
-;; flying the flight code decides the two districts itself: the one Jak is over and the one he's
-;; heading for, re-decided every few frames and whenever a region changes the wants.
-(define *df-stream-ahead* 2.5)             ;; seconds of flight the next district is picked ahead...
+;; ---- LEVEL STREAMING WHILE FLYING (any area) ----
+;; The game swaps levels with trigger regions at gates and doorways; flying over the walls never
+;; crosses them, so at speed you reach a level before it's loaded (Haven's districts, Spargus's
+;; two halves...). Every continue point stores the exact level set the game loads at that spot,
+;; always a set that fits the level heap. While flying, ask for the set of the continue point
+;; nearest to where Jak will be in a few seconds, plus the level under him, re-decided every few
+;; frames and whenever anything else changes the wants.
+(define *df-stream-ahead* 2.5)             ;; seconds of flight the next area is picked ahead...
 (define *df-stream-ahead-min* (meters 100)) ;; ...at least this far, at most *df-stream-ahead-max*
-(define *df-stream-ahead-max* (meters 250)) ;; (a district can be narrower than 3 s of fast flight;
-                                            ;; the half-way point is checked first so none is skipped)
+(define *df-stream-ahead-max* (meters 250)) ;; (the half-way point is checked first so none is skipped)
 (define *df-stream-settle* 3)              ;; decisions in a row a new "next" needs before it counts
+(define *df-stream-every* 6)               ;; frames between decisions
+(define *df-stream-reach* (meters 400))    ;; no continue point this close: not a streamed area, hands off
+(define *df-air-frame* 0)                  ;; last frame the flight code ran (the want hook checks it)
+(define *df-stream-now* #f)                ;; the level Jak is over
+(define *df-stream-next* #f)               ;; the level he's heading for
 (define *df-stream-cand* #f)               ;; the "next" being considered, and for how long
 (define *df-stream-cand-n* 0)
-(define *df-stream-last-frame* 0)       ;; when the last decision ran
-(define *df-stream-every* 6)               ;; frames between decisions
-(define *df-air-frame* 0)                  ;; last frame the flight code ran (the want hook checks it)
-(define *df-stream-now* #f)                ;; the district Jak is over
-(define *df-stream-next* #f)               ;; the district he's heading for
-(define *df-stream-prev* #f)               ;; the district he just left (kept while nothing's ahead)
-(define *df-stream-second* #f)             ;; the second district we chose last time
+(define *df-stream-last-frame* 0)          ;; when the last decision ran
+(define *df-stream-prev* #f)               ;; the level Jak just left (kept until a new "next" shows up)
+(define *df-stream-cnow* (the-as continue-point #f))
+(define *df-stream-cnext* (the-as continue-point #f))
+;; dev/cutscene levels whose continue points sit in the world: never used, never wanted
+(define *df-stream-exclude* '(ctyfence test-zone title intro introcst demo halfpipe skatepark
+                              chartest dptest eitest miketest tatetest tobytest teststdc teststdd vistest woodstest andrew01 4aaron 4pal01))
+;; areas that stream by position on their own: the streamer stays out (none in Jak 2)
+(define *df-stream-skip-prefixes* '()) ;; (Jak 2 has no area that streams by position itself)
 
 (defun df-level-outside? ((name symbol) (pos vector))
   "Is pos outside loaded level NAME's main geometry sphere (so it's safe to unload it)?
-   (The level's own bsp bsphere is empty for the city; its first drawable tree's isn't.)
-   A level that isn't loaded counts as outside."
+   (The city's bsp bsphere may be empty; the level's first drawable tree's sphere is real
+   geometry.) A level that isn't loaded counts as outside."
   (let ((out #t))
     (dotimes (i LEVEL_MAX)
       (let ((lv (-> *level* level i)))
@@ -2785,8 +2791,29 @@
     )
   )
 
+(defun df-stream-skip-level? ((name symbol))
+  "A dev/cutscene level the streamer never considers or wants."
+  (if (member name *df-stream-exclude*) #t #f)
+  )
+
+(defun df-stream-hands-off? ((name symbol))
+  "An area that streams by position on its own (the desert): no decisions there."
+  (let ((skip #f)
+        (str (symbol->string name))
+        (ps *df-stream-skip-prefixes*)
+        )
+    (while (not (null? ps))
+      (if (string-prefix= (the-as string (car ps)) str)
+          (set! skip #t)
+          )
+      (set! ps (cdr ps))
+      )
+    skip
+    )
+  )
+
 (defun df-city-mission? ()
-  "Is a city mission level loaded (its actors are the mission, so leave the level list alone)?"
+  "Is a city mission level wanted (its actors are the mission, so leave the level list alone)?"
   (let ((m #f))
     (dotimes (i LEVEL_MAX)
       (let ((nm (-> *load-state* want i name)))
@@ -2799,31 +2826,83 @@
     )
   )
 
-(defun df-district-at ((pos vector))
-  "Which district is this point in? The level data has no usable footprints (the city bsp
-   bspheres are empty and the tfrag ones overlap by hundreds of metres), so use the continue
-   points: each carries the district it sits in (vis-nick), and the nearest one wins."
-  (let ((best (the-as symbol #f))
+(defun df-want-count ((c continue-point))
+  "How many levels this continue point's set names (Jak 2 stores a fixed array of 6)."
+  (let ((n 0))
+    (dotimes (i 6)
+      (if (-> c want i name)
+          (set! n (+ n 1))
+          )
+      )
+    n
+    )
+  )
+
+(defun df-continue-wants? ((c continue-point) (name symbol))
+  "Does this continue point's level set include NAME?"
+  (let ((yes #f))
+    (dotimes (i (df-want-count c))
+      (if (= (-> c want i name) name)
+          (set! yes #t)
+          )
+      )
+    yes
+    )
+  )
+
+(defun df-level-present? ((name symbol))
+  "Is this level wanted or loaded right now?"
+  (let ((yes #f))
+    (dotimes (i LEVEL_MAX)
+      (if (= (-> *load-state* want i name) name)
+          (set! yes #t)
+          )
+      )
+    (dotimes (i LEVEL_MAX)
+      (if (and (= (-> *level* level i name) name) (!= (-> *level* level i status) 'inactive))
+          (set! yes #t)
+          )
+      )
+    yes
+    )
+  )
+
+(defun df-nearest-continue ((pos vector) (near symbol))
+  "The continue point nearest to pos, skipping dev levels and continues that don't list a real
+   level set (ctyfence-start wants only itself, and ctyfence has no file). With NEAR, only
+   continues of NEAR itself or of its neighbours count: levels whose continues list NEAR, or
+   that NEAR's continues list. (Interiors and the catacombs have continue points inside the
+   city's volume; the game's own lists say what connects to what.)"
+  (let ((best (the-as continue-point #f))
         (bestd 0.0)
         (lst *level-load-list*)
         )
     (while (not (null? lst))
       (let ((info (-> (the-as symbol (car lst)) value)))
         (when (and (type? info level-load-info)
-                   (string-prefix= "cty" (symbol->string (-> (the-as level-load-info info) name)))
+                   (not (df-stream-skip-level? (-> (the-as level-load-info info) name)))
                    )
           (let ((cl (-> (the-as level-load-info info) continues)))
             (while (not (null? cl))
-              (let* ((c (the-as continue-point (car cl)))
-                     (nick (-> c vis-nick))
-                     )
-                (when (member nick *df-city-districts*)
+              (let ((c (the-as continue-point (car cl))))
+                (when (and (< 1 (df-want-count c))
+                           (-> c level)
+                           (not (df-stream-skip-level? (-> c level)))
+                           (if near
+                               (or (= (-> c level) near)
+                                   (df-continue-wants? c near)
+                                   (and *df-stream-cnow* (df-continue-wants? *df-stream-cnow* (-> c level)))
+                                   )
+                               (df-level-present? (-> c level)) ;; the spot we're at: a level we have
+                               )
+                           )
                   (let* ((dx (- (-> c trans x) (-> pos x)))
+                         (dy (- (-> c trans y) (-> pos y)))
                          (dz (- (-> c trans z) (-> pos z)))
-                         (d (+ (* dx dx) (* dz dz)))
+                         (d (+ (* dx dx) (* dy dy) (* dz dz)))
                          )
                     (when (or (not best) (< d bestd))
-                      (set! best nick)
+                      (set! best c)
                       (set! bestd d)
                       )
                     )
@@ -2836,168 +2915,192 @@
         )
       (set! lst (cdr lst))
       )
+    (if (and best (< *df-stream-reach* (sqrtf bestd)))
+        (set! best (the-as continue-point #f))
+        )
     best
     )
   )
 
-(defun df-real-level? ((name symbol))
-  "Does this level take one of the level heap's real banks (i.e. it isn't a borrow level)?"
+(defun df-borrow-level? ((name symbol))
+  "A borrow-mode level (the game re-adds these itself from its hosts)."
   (let ((info (lookup-level-info name)))
-    (if (and info (!= (-> info memory-mode) (load-buffer-mode borrow)))
+    (if (and info (= (-> info memory-mode) (load-buffer-mode borrow)))
         #t
         #f
         )
     )
   )
 
+(defun df-real-level? ((name symbol))
+  "Does this level take a real bank of the level heap (i.e. it isn't a borrow level)?"
+  (let ((info (lookup-level-info name)))
+    (if (and info (not (df-borrow-level? name)))
+        #t
+        #f
+        )
+    )
+  )
+
+(defun df-stream-add ((keep (pointer symbol)) (disp (pointer symbol)) (n int) (name symbol) (d symbol))
+  "Append name (with its display flag) to the keep list unless it's there, excluded or just failed."
+  (when (and name
+             (< n LEVEL_MAX)
+             (not (df-stream-skip-level? name))
+             (not (and (= name *df-stream-failed*)
+                       (< (- (-> *display* real-clock frame-counter) *df-stream-failed-frame*) (seconds 10))))
+             )
+    (let ((dup #f))
+      (dotimes (i n)
+        (if (= (-> keep i) name)
+            (set! dup #t)
+            )
+        )
+      (when (not dup)
+        (when (< n LEVEL_MAX)
+          (set! (-> keep n) name)
+          (set! (-> disp n) d)
+          (set! n (+ n 1))
+          )
+        )
+      )
+    )
+  n
+  )
+
 (defun df-stream-decide ()
-  "Pick the districts to keep loaded -- the one Jak is over, the one ahead, else the one he just
-   left -- and re-issue the wants if they differ from what's wanted now. (The game's own idea of
-   Jak's current level is stale in flight: it stayed ctyport across the whole city, so it isn't
-   used.) Non-district levels stay wanted; an interior (the hiphog, gungame...) takes a district
-   bank, so once Jak is clear of it it's dropped to make room. At most two districts ever fit."
+  "Pick the level set to keep loaded and re-issue the wants if it differs from what's wanted now."
   (when (and *target* (not (df-city-mission?)))
     (let* ((pos (-> *target* control trans))
            (v (-> *target* control transv))
            (sp (vector-xz-length v))
            (ahead (new-stack-vector0))
-           (now (df-district-at pos))
-           (next (the-as symbol #f))
+           (cnow (df-nearest-continue pos (the-as symbol #f)))
+           (cnext (the-as continue-point #f))
+           (failed? (and *df-stream-failed*
+                         (< (- (-> *display* real-clock frame-counter) *df-stream-failed-frame*) (seconds 3))))
            )
-      (vector-copy! ahead pos)
-      (when (< (meters 1) sp)
-        ;; look half way and all the way ahead, so the neighbour is never skipped
-        (let ((k (/ (fmin *df-stream-ahead-max* (fmax *df-stream-ahead-min* (* sp *df-stream-ahead*))) sp)))
-          (set! (-> ahead x) (+ (-> pos x) (* (-> v x) (* 0.5 k))))
-          (set! (-> ahead z) (+ (-> pos z) (* (-> v z) (* 0.5 k))))
-          (set! next (df-district-at ahead))
-          (set! (-> ahead x) (+ (-> pos x) (* (-> v x) k)))
-          (set! (-> ahead z) (+ (-> pos z) (* (-> v z) k)))
-          (let ((far (df-district-at ahead)))
-            (if (= next now)
-                (set! next far)
+      (when (and cnow (not (df-stream-hands-off? (-> cnow level))))
+        (let ((now (-> cnow level))
+              (next (the-as symbol #f))
+              )
+          (set! *df-stream-cnow* cnow)
+          (vector-copy! ahead pos)
+          ;; after a failed load, stick to this spot's own set for a while
+          (when (and (< (meters 1) sp) (not failed?))
+            ;; look half way and all the way ahead, so the neighbour is never skipped
+            (let ((k (/ (fmin *df-stream-ahead-max* (fmax *df-stream-ahead-min* (* sp *df-stream-ahead*))) sp)))
+              (set! (-> ahead x) (+ (-> pos x) (* (-> v x) (* 0.5 k))))
+              (set! (-> ahead z) (+ (-> pos z) (* (-> v z) (* 0.5 k))))
+              (set! cnext (df-nearest-continue ahead now))
+              (when (or (not cnext) (= (-> cnext level) now))
+                (set! (-> ahead x) (+ (-> pos x) (* (-> v x) k)))
+                (set! (-> ahead z) (+ (-> pos z) (* (-> v z) k)))
+                (set! cnext (df-nearest-continue ahead now))
                 )
-            ;; the renderer can fetch the district after that one meanwhile
-            (set! *df-prewarm-level* (if (and far (!= far now) (!= far next)) far (the-as symbol #f)))
+              )
             )
-          )
-        )
-      (if (= next now)
-          (set! next #f)
-          )
-      ;; after a teleport or a long walk the remembered districts are stale: forget them
-      (when (< 120 (- (-> *display* real-clock frame-counter) *df-stream-last-frame*))
-        (set! *df-stream-prev* #f)
-        (set! *df-stream-second* #f)
-        (set! *df-stream-cand* #f)
-        (set! *df-stream-next* #f)
-        )
-      (set! *df-stream-last-frame* (-> *display* real-clock frame-counter))
-      ;; a new "next" has to hold for a few decisions before it replaces the old one
-      (cond
-        ((= next *df-stream-cand*)
-         (set! *df-stream-cand-n* (+ *df-stream-cand-n* 1))
-         )
-        (else
-          (set! *df-stream-cand* next)
-          (set! *df-stream-cand-n* 1)
-          )
-        )
-      (if (and (!= next *df-stream-next*) (< *df-stream-cand-n* *df-stream-settle*) (!= *df-stream-next* now))
-          (set! next *df-stream-next*)
-          )
-      (when (and now (!= now *df-stream-now*))
-        (set! *df-stream-prev* *df-stream-now*)
-        )
-      (set! *df-stream-now* now)
-      (set! *df-stream-next* next)
-      (let ((keep (new 'stack-no-clear 'array 'symbol 6))
-            (n 0)
-            (real-others 0)
+          (if (and cnext (!= (-> cnext level) now))
+              (set! next (-> cnext level))
+              (set! cnext (the-as continue-point #f))
+              )
+          ;; after a teleport or a long walk the remembered levels are stale: forget them
+          (when (< (seconds 2) (- (-> *display* real-clock frame-counter) *df-stream-last-frame*))
+            (set! *df-stream-cand* #f)
+            (set! *df-stream-next* #f)
+            (set! *df-stream-cnext* (the-as continue-point #f))
+            (set! *df-stream-prev* #f)
             )
-        (dotimes (i 6)
-          (set! (-> keep i) #f)
-          )
-        ;; non-district levels stay (borrow levels are re-added by the game itself)
-        (dotimes (i LEVEL_MAX)
-          (let ((nm (-> *load-state* want i name)))
-            (when (and nm (not (member nm *df-city-districts*)) (df-real-level? nm) (< n 6))
-              (cond
-                ((and (!= nm 'ctywide) (df-level-outside? nm pos))
-                 ;; an interior we're clear of: let it go
-                 )
-                (else
-                  (set! (-> keep n) nm)
-                  (set! n (+ n 1))
-                  (if (!= nm 'ctywide)
-                      (set! real-others (+ real-others 1))
+          (when (and now (!= now *df-stream-now*))
+            (set! *df-stream-prev* *df-stream-now*)
+            )
+          (set! *df-stream-last-frame* (-> *display* real-clock frame-counter))
+          ;; a new "next" has to hold for a few decisions before it replaces the old one
+          (cond
+            ((= next *df-stream-cand*)
+             (set! *df-stream-cand-n* (+ *df-stream-cand-n* 1))
+             )
+            (else
+              (set! *df-stream-cand* next)
+              (set! *df-stream-cand-n* 1)
+              )
+            )
+          (cond
+            ((and (!= next *df-stream-next*) (< *df-stream-cand-n* *df-stream-settle*) (!= *df-stream-next* now))
+             ;; not settled yet: keep the previous next (and its continue)
+             (set! next *df-stream-next*)
+             (set! cnext *df-stream-cnext*)
+             )
+            (else
+              (set! *df-stream-next* next)
+              (set! *df-stream-cnext* cnext)
+              )
+            )
+          (set! *df-stream-now* now)
+          ;; the level set: the ground under Jak, then what the game loads at the spot ahead,
+          ;; then what it loads here, then any loaded level Jak is still inside of
+          (let ((keep (new 'stack-no-clear 'array 'symbol 6))
+                (disp (new 'stack-no-clear 'array 'symbol 6))
+                (n 0)
+                )
+            (dotimes (i LEVEL_MAX)
+              (set! (-> keep i) #f)
+              (set! (-> disp i) #f)
+              )
+            (set! n (df-stream-add keep disp n now 'display))
+            (cond
+              (cnext
+                ;; two spots: their main levels plus what both spots share (the union of two
+                ;; valid sets can exceed the heap; the shared part plus two mains is what the
+                ;; game itself has when standing at a gate)
+                (set! n (df-stream-add keep disp n (-> cnext level) 'display))
+                (dotimes (i (df-want-count cnext))
+                  (if (df-continue-wants? cnow (-> cnext want i name))
+                      (set! n (df-stream-add keep disp n (-> cnext want i name) (-> cnext want i display?)))
+                      )
+                  )
+                (dotimes (i (df-want-count cnow))
+                  (if (df-continue-wants? cnext (-> cnow want i name))
+                      (set! n (df-stream-add keep disp n (-> cnow want i name) (-> cnow want i display?)))
+                      )
+                  )
+                )
+              (else
+                ;; one spot: the level under Jak, the one he just left while it's still here,
+                ;; plus whatever of this spot's set is already here (never pull in a spot's
+                ;; optional extra -- the arena, an interior -- just for flying past; the gate
+                ;; regions do that on landing)
+                (if (and *df-stream-prev* (df-level-present? *df-stream-prev*))
+                    (set! n (df-stream-add keep disp n *df-stream-prev* 'display))
+                    )
+                (dotimes (i (df-want-count cnow))
+                  (if (df-level-present? (-> cnow want i name))
+                      (set! n (df-stream-add keep disp n (-> cnow want i name) (-> cnow want i display?)))
                       )
                   )
                 )
               )
-            )
-          )
-        ;; districts, most important first, as many as fit. The second slot is the district
-        ;; ahead; with nothing new ahead it keeps whatever district it already holds (no flip-flop
-        ;; when the look-ahead point wobbles across a boundary), else the district just left.
-        (let ((allowed (- 2 real-others))
-              (cands (new 'stack-no-clear 'array 'symbol 3))
-              (second (the-as symbol #f))
-              )
-          (cond
-            (next
-              (set! second next)
-              )
-            ((and *df-stream-second* (!= *df-stream-second* now))
-             (set! second *df-stream-second*) ;; ours from last time, not one a region slipped in
-             )
-            (else
-              (set! second *df-stream-prev*)
-              )
-            )
-          (set! *df-stream-second* second)
-          (set! (-> cands 0) now)
-          (set! (-> cands 1) second)
-          (set! (-> cands 2) #f)
-          (dotimes (i 3)
-            (let ((d (-> cands i)))
-              (when (and d (< 0 allowed) (< n 6))
-                (let ((dup #f))
-                  (dotimes (j n)
-                    (if (= (-> keep j) d)
-                        (set! dup #t)
-                        )
-                    )
-                  (when (not dup)
-                    (set! (-> keep n) d)
-                    (set! n (+ n 1))
-                    (set! allowed (- allowed 1))
-                    )
-                  )
-                )
-              )
-            )
-          )
-        ;; only touch the wants when they'd change (ignoring borrow levels)
-        (let ((same #t))
-          (dotimes (i n)
-            (let ((found #f))
-              (dotimes (j LEVEL_MAX)
-                (if (= (-> *load-state* want j name) (-> keep i))
-                    (set! found #t)
+            (dotimes (i LEVEL_MAX)
+              (let ((nm (-> *load-state* want i name)))
+                (if (and nm (or (= (-> *load-state* want i display?) 'special) ;; always-resident (wasall)
+                                (and (df-real-level? nm) (not (df-level-outside? nm pos)))))
+                    (set! n (df-stream-add keep disp n nm (-> *load-state* want i display?)))
                     )
                 )
-              (if (not found)
-                  (set! same #f)
-                  )
               )
-            )
-          (dotimes (j LEVEL_MAX)
-            (let ((nm (-> *load-state* want j name)))
-              (when (and nm (df-real-level? nm))
+            ;; only touch the wants when they'd change (ignoring borrow levels, which the game adds),
+            ;; and never without the level under Jak in the list
+            (let ((same #t)
+                  (have-now #f))
+              (dotimes (i n)
+                (if (= (-> keep i) now)
+                    (set! have-now #t)
+                    )
+                )
+              (dotimes (i n)
                 (let ((found #f))
-                  (dotimes (i n)
-                    (if (= (-> keep i) nm)
+                  (dotimes (j LEVEL_MAX)
+                    (if (= (-> *load-state* want j name) (-> keep i))
                         (set! found #t)
                         )
                     )
@@ -3006,23 +3109,39 @@
                       )
                   )
                 )
-              )
-            )
-          (when (not same)
-            (let ((was *df-in-want-hook?*))
-              (set! *df-in-want-hook?* #t) ;; our own want-levels must not re-enter the hook
-              (want-levels *load-state* (the-as (pointer symbol) keep))
-              (set! *df-in-want-hook?* was)
-              )
-            (dotimes (i n)
-              (if (member (-> keep i) *df-city-districts*)
-                  (want-display-level *load-state* (-> keep i) 'display)
+              (dotimes (j LEVEL_MAX)
+                (let ((nm (-> *load-state* want j name)))
+                  (when (and nm (not (df-borrow-level? nm)))
+                    (let ((found #f))
+                      (dotimes (i n)
+                        (if (= (-> keep i) nm)
+                            (set! found #t)
+                            )
+                        )
+                      (if (not found)
+                          (set! same #f)
+                          )
+                      )
+                    )
                   )
-              )
-            (if *df-stream-log?*
-                (format 0 "LVL ~D ~D stream ~A ~A ~,,0M ~,,0M~%" (-> *display* real-clock frame-counter)
-                        (/ (the int (get-cpu-clock)) 300000) now next (-> pos x) (-> pos z))
                 )
+              (when (and (not same) have-now)
+                (let ((was *df-in-want-hook?*))
+                  (set! *df-in-want-hook?* #t) ;; our own want-levels must not re-enter the hook
+                  (want-levels *load-state* (the-as (pointer symbol) keep))
+                  (set! *df-in-want-hook?* was)
+                  )
+                (dotimes (i n)
+                  (if (-> disp i)
+                      (want-display-level *load-state* (-> keep i) (-> disp i))
+                      )
+                  )
+                (if *df-stream-log?*
+                    (format 0 "LVL ~D ~D stream ~A ~A ~,,0M ~,,0M~%" (-> *display* real-clock frame-counter)
+                            (/ (the int (get-cpu-clock)) 300000) now next (-> pos x) (-> pos z))
+                    )
+                )
+              )
             )
           )
         )
@@ -3032,32 +3151,48 @@
   )
 
 (defun df-stream-hook ()
-  "Runs after every want-levels call (see level-h.gc): while flying in the city, re-decide."
-  (when (and *df-in-city?*
-             (< (- (-> *display* real-clock frame-counter) *df-air-frame*) 60)
-             )
-    (df-stream-decide)
-    )
+  "Runs after every want-levels call (see level-h.gc): while flying, re-decide."
+  (if (< (- (-> *display* real-clock frame-counter) *df-air-frame*) 60)
+      (df-stream-decide)
+      )
   (none)
   )
 (set! *df-want-levels-hook* df-stream-hook)
 
-(defbehavior dark-flight-city-tick target ()
-  "Per frame while flying in the city: the district decision every few frames, and every wanted
-   district displayed (display is normally switched on by regions at the gates, which flight
-   skips: the district sat in memory undrawn and you saw a dark cliff)."
+(defbehavior dark-flight-stream-tick target ()
+  "Per frame while flying, anywhere: the level decision every few frames, and every wanted
+   level that is loaded but undrawn displayed (display is normally switched on by regions at
+   the gates, which flight skips: a loaded district sat undrawn behind a dark cliff)."
   (set! *df-air-frame* (-> *display* real-clock frame-counter))
   (set! *df-fast-load-until* (+ (-> *display* real-clock frame-counter) 60)) ;; drain DGOs while flying
-  (set! *df-vis-from-air?* #t) ;; new districts draw fully from the air (cam-update.gc)
+  (set! *df-vis-from-air?* #t) ;; new levels draw fully from the air (cam-update.gc)
   (set! *df-stream-timer* (+ *df-stream-timer* 1))
   (when (<= *df-stream-every* *df-stream-timer*)
     (set! *df-stream-timer* 0)
     (df-stream-decide)
-    (dotimes (i LEVEL_MAX)
-      (let ((nm (-> *load-state* want i name)))
-        (when (and nm (member nm *df-city-districts*) (not (-> *load-state* want i display?))
-                   (not (df-city-mission?)))
-          (want-display-level *load-state* nm 'display)
+    (when *df-stream-cnow*
+      (dotimes (i LEVEL_MAX)
+        (let ((nm (-> *load-state* want i name)))
+          (when (and nm (not (-> *load-state* want i display?)))
+            ;; displayed if the continue here (or ahead) says so
+            (let ((d (the-as symbol #f)))
+              (dotimes (k (df-want-count *df-stream-cnow*))
+                (if (= (-> *df-stream-cnow* want k name) nm)
+                    (set! d (-> *df-stream-cnow* want k display?))
+                    )
+                )
+              (when *df-stream-cnext*
+                (dotimes (k (df-want-count *df-stream-cnext*))
+                  (if (= (-> *df-stream-cnext* want k name) nm)
+                      (set! d (-> *df-stream-cnext* want k display?))
+                      )
+                  )
+                )
+              (if d
+                  (want-display-level *load-state* nm d)
+                  )
+              )
+            )
           )
         )
       )
@@ -3076,11 +3211,11 @@
                           #f
                           )
         )
+  (dark-flight-stream-tick)
   (when *df-in-city?*
-    (dark-flight-city-tick)
     ;; the ceiling of the district Jak is actually over (current-level lags far behind in flight;
     ;; the streamer's continue-point lookup is current)
-    (let ((nm (symbol->string (if *df-stream-now* *df-stream-now* (-> self current-level name)))))
+    (let ((nm (symbol->string (if (and *df-stream-now* (member *df-stream-now* *df-city-districts*)) *df-stream-now* (-> self current-level name)))))
       (set! *df-city-ceiling* (cond
                                 ((string-prefix= "ctyport" nm) *df-ceil-port*)
                                 ((string-prefix= "ctyinda" nm) *df-ceil-inda*)
