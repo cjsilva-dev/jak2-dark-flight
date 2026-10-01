@@ -2218,8 +2218,8 @@
 (define *df-glide-cruise*      (meters 22))
 (define *df-glide-max*         (meters 45))
 (define *df-glide-accel*       (meters 10))
-(define *df-glide-turbo-accel* (meters 40))  ;; in the city (was 25/50 while Haven's streaming
-(define *df-glide-turbo-max*   (meters 90))  ;; couldn't keep up; it can now, see the streamer below)
+(define *df-glide-turbo-accel* (meters 25))  ;; in the city: slower so Haven stays navigable (its
+(define *df-glide-turbo-max*   (meters 50))  ;; streaming keeps up with 90 m/s now, see the streamer)
 (define *df-glide-turbo-accel-open* (meters 40)) ;; outside the city
 (define *df-glide-turbo-max-open*   (meters 90))
 (define *df-glide-turbo-sink*  (meters 1))
@@ -2231,8 +2231,8 @@
 (define *df-turbo-window*      (seconds 0.5))  ;; R1 turbo lasts this long after each flap (1.2 s flung Jak on after the last flap)
 (define *df-gravity*           110592.0)       ;; ~27 m/s^2 while flying (as Jak 3's Dark Jak)
 (define *df-safe-fall?*        #f)             ;; flew since last standing on something: no fall damage
-(define *df-fly-turbo-accel*   (meters 40))    ;; flapping turbo in the city: driven directly (the
-(define *df-fly-turbo-max*     (meters 90))    ;; surface's own easing only reached ~25 m/s); same as outside now
+(define *df-fly-turbo-accel*   (meters 25))    ;; flapping turbo in the city: driven directly (the
+(define *df-fly-turbo-max*     (meters 45))    ;; surface's own easing only reached ~25 m/s)
 (define *df-fly-turbo-accel-open* (meters 40)) ;; ... and outside the city
 (define *df-fly-turbo-max-open*   (meters 90))
 (define *df-wing-glide-rate*   0.8)            ;; wing flap rate while gliding, at cruise speed
@@ -3118,7 +3118,7 @@
 ;; dark sparks and lightning, with a small dark-bomb hit sphere, rumble and a camera jolt. Holding
 ;; R1 still boosts as before.
 (define *df-dash-speed*    (meters 55))
-(define *df-dash-city-speed* (meters 55)) ;; in the city (same as outside; the districts stream fast enough now)
+(define *df-dash-city-speed* (meters 45)) ;; in the city (for handling; the districts stream fast enough for more)
 (define *df-dash-time*     (seconds 0.3))
 (define *df-dash-cooldown* (seconds 0.6))
 (define *df-dash-start*    (the-as time-frame 0))
