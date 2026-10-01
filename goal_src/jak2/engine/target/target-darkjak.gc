@@ -3038,6 +3038,7 @@
    district displayed (display is normally switched on by regions at the gates, which flight
    skips: the district sat in memory undrawn and you saw a dark cliff)."
   (set! *df-air-frame* (-> *display* real-clock frame-counter))
+  (set! *df-fast-load-until* (+ (-> *display* real-clock frame-counter) 60)) ;; drain DGOs while flying
   (set! *df-vis-from-air?* #t) ;; new districts draw fully from the air (cam-update.gc)
   (set! *df-stream-timer* (+ *df-stream-timer* 1))
   (when (<= *df-stream-every* *df-stream-timer*)

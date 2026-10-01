@@ -732,7 +732,9 @@ into 7 sections, which might explain the weird sizes in the center.
 (define *df-load-budget-ms* 2.5)
 (defun load-continue-pc ((lev level))
   (load-continue lev)
-  (when (and (< 0.0 *df-load-budget-ms*) (!= lev (-> *level* default-level)))
+  (when (and (< 0.0 *df-load-budget-ms*)
+             (< (-> *display* real-clock frame-counter) *df-fast-load-until*)
+             (!= lev (-> *level* default-level)))
     (let ((start (the int (get-cpu-clock)))
           (limit (the int (* 300000.0 *df-load-budget-ms*)))
           )
@@ -3025,8 +3027,14 @@ into 7 sections, which might explain the weird sizes in the center.
     ;; too, so the .fr3 streams in while the DGO is still loading (or queued behind another),
     ;; plus the one the flight code expects after that (a free renderer slot, nothing else).
     (dotimes (w (+ LEVEL_MAX 1))
-      (let ((nm (if (< w LEVEL_MAX) (-> *load-state* want w name) *df-prewarm-level*)))
-        (when nm
+      (let ((nm (if (< w LEVEL_MAX) (-> *load-state* want w name) *df-prewarm-level*))
+            (info (the-as level-load-info #f)))
+        (if nm
+            (set! info (lookup-level-info nm))
+            )
+        ;; only levels with an .fr3 of their own: not alias or borrow levels (the renderer
+        ;; asserts on a missing file)
+        (when (and nm info (!= (-> info memory-mode) (load-buffer-mode borrow)))
           (let ((s (symbol->string nm))
                 (have #f)
                 )
