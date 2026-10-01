@@ -19,6 +19,9 @@
 ;; re-decided in the same frame instead of thrashing against the regions.
 (define *df-want-levels-hook* (the-as (function none) #f))
 (define *df-in-want-hook?* #f)
+;; A level the flight code expects soon: its .fr3 is handed to the renderer early (level.gc) so
+;; it's in the renderer's cache before the game asks for it. Not loaded by the game.
+(define *df-prewarm-level* (the-as symbol #f))
 (defun df-lvl-log ((ev string) (name symbol) (a symbol) (b symbol))
   (if *df-stream-log?*
       (format 0 "LVL ~D ~D ~S ~A ~A ~A~%"

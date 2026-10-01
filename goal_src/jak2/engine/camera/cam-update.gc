@@ -1,6 +1,9 @@
 ;;-*-Lisp-*-
 (in-package goal)
 
+;; DARK FLIGHT MOD: set by the flight code while flying in the city (see cam-update's vis logic)
+(define *df-vis-from-air?* #f)
+
 ;; name: cam-update.gc
 ;; name in dgo: cam-update
 ;; dgos: ENGINE, GAME
@@ -140,7 +143,12 @@
                     (set! (-> s5-1 all-visible?) #f)
                     )
                   )
-                 ((and (= (-> s5-1 all-visible?) 'loading) (-> *level* play?))
+                 ;; DARK FLIGHT MOD: a freshly loaded level has zeroed vis bits and all-visible? =
+                 ;; 'loading, and this clause left them that way until the camera was inside its
+                 ;; bsp. Arriving from the air it never is, so a new district drew nothing but its
+                 ;; actors (people and cars floating in black) until you came down to street
+                 ;; level. While flying, draw everything instead, as the else branch does.
+                 ((and (= (-> s5-1 all-visible?) 'loading) (-> *level* play?) (not *df-vis-from-air?*))
                   )
                  (else
                    (quad-copy! (-> s5-1 vis-bits) (-> s5-1 bsp all-visible-list) a2-0)

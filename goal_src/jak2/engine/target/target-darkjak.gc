@@ -2218,8 +2218,8 @@
 (define *df-glide-cruise*      (meters 22))
 (define *df-glide-max*         (meters 45))
 (define *df-glide-accel*       (meters 10))
-(define *df-glide-turbo-accel* (meters 25))  ;; in the city
-(define *df-glide-turbo-max*   (meters 50))
+(define *df-glide-turbo-accel* (meters 40))  ;; in the city (was 25/50 while Haven's streaming
+(define *df-glide-turbo-max*   (meters 90))  ;; couldn't keep up; it can now, see the streamer below)
 (define *df-glide-turbo-accel-open* (meters 40)) ;; outside the city
 (define *df-glide-turbo-max-open*   (meters 90))
 (define *df-glide-turbo-sink*  (meters 1))
@@ -2231,8 +2231,8 @@
 (define *df-turbo-window*      (seconds 0.5))  ;; R1 turbo lasts this long after each flap (1.2 s flung Jak on after the last flap)
 (define *df-gravity*           110592.0)       ;; ~27 m/s^2 while flying (as Jak 3's Dark Jak)
 (define *df-safe-fall?*        #f)             ;; flew since last standing on something: no fall damage
-(define *df-fly-turbo-accel*   (meters 25))    ;; flapping turbo in the city: driven directly (the
-(define *df-fly-turbo-max*     (meters 45))    ;; surface's own easing only reached ~25 m/s)
+(define *df-fly-turbo-accel*   (meters 40))    ;; flapping turbo in the city: driven directly (the
+(define *df-fly-turbo-max*     (meters 90))    ;; surface's own easing only reached ~25 m/s); same as outside now
 (define *df-fly-turbo-accel-open* (meters 40)) ;; ... and outside the city
 (define *df-fly-turbo-max-open*   (meters 90))
 (define *df-wing-glide-rate*   0.8)            ;; wing flap rate while gliding, at cruise speed
@@ -2742,12 +2742,19 @@
 ;; trigger regions at the street-level gates. Flying over the walls never crosses those, so while
 ;; flying the flight code decides the two districts itself: the one Jak is over and the one he's
 ;; heading for, re-decided every few frames and whenever a region changes the wants.
-(define *df-stream-ahead* 3.0)             ;; seconds of flight the next district is picked ahead
-(define *df-stream-ahead-min* (meters 80)) ;; ...but at least this far
+(define *df-stream-ahead* 2.5)             ;; seconds of flight the next district is picked ahead...
+(define *df-stream-ahead-min* (meters 100)) ;; ...at least this far, at most *df-stream-ahead-max*
+(define *df-stream-ahead-max* (meters 250)) ;; (a district can be narrower than 3 s of fast flight;
+                                            ;; the half-way point is checked first so none is skipped)
+(define *df-stream-settle* 3)              ;; decisions in a row a new "next" needs before it counts
+(define *df-stream-cand* #f)               ;; the "next" being considered, and for how long
+(define *df-stream-cand-n* 0)
 (define *df-stream-every* 6)               ;; frames between decisions
 (define *df-air-frame* 0)                  ;; last frame the flight code ran (the want hook checks it)
 (define *df-stream-now* #f)                ;; the district Jak is over
 (define *df-stream-next* #f)               ;; the district he's heading for
+(define *df-stream-prev* #f)               ;; the district he just left (kept while nothing's ahead)
+(define *df-stream-second* #f)             ;; the second district we chose last time
 
 (defun df-level-outside? ((name symbol) (pos vector))
   "Is pos outside loaded level NAME's main geometry sphere (so it's safe to unload it)?
@@ -2843,30 +2850,56 @@
   )
 
 (defun df-stream-decide ()
-  "Pick the districts to keep loaded -- the one Jak is over, the one the game says he's in, the one
-   ahead -- and re-issue the wants if they differ from what's wanted now. Non-district levels stay
-   wanted; an interior (the hiphog, gungame...) takes a district bank, so once Jak is clear of it
-   it's dropped to make room for the district ahead. At most two districts ever fit."
+  "Pick the districts to keep loaded -- the one Jak is over, the one ahead, else the one he just
+   left -- and re-issue the wants if they differ from what's wanted now. (The game's own idea of
+   Jak's current level is stale in flight: it stayed ctyport across the whole city, so it isn't
+   used.) Non-district levels stay wanted; an interior (the hiphog, gungame...) takes a district
+   bank, so once Jak is clear of it it's dropped to make room. At most two districts ever fit."
   (when (and *target* (not (df-city-mission?)))
     (let* ((pos (-> *target* control trans))
            (v (-> *target* control transv))
            (sp (vector-xz-length v))
            (ahead (new-stack-vector0))
            (now (df-district-at pos))
-           (cur (-> *target* current-level name))
            (next (the-as symbol #f))
            )
       (vector-copy! ahead pos)
       (when (< (meters 1) sp)
-        (let ((k (fmax *df-stream-ahead* (/ *df-stream-ahead-min* sp))))
+        ;; look half way and all the way ahead, so the neighbour is never skipped
+        (let ((k (/ (fmin *df-stream-ahead-max* (fmax *df-stream-ahead-min* (* sp *df-stream-ahead*))) sp)))
+          (set! (-> ahead x) (+ (-> pos x) (* (-> v x) (* 0.5 k))))
+          (set! (-> ahead z) (+ (-> pos z) (* (-> v z) (* 0.5 k))))
+          (set! next (df-district-at ahead))
           (set! (-> ahead x) (+ (-> pos x) (* (-> v x) k)))
           (set! (-> ahead z) (+ (-> pos z) (* (-> v z) k)))
+          (let ((far (df-district-at ahead)))
+            (if (= next now)
+                (set! next far)
+                )
+            ;; the renderer can fetch the district after that one meanwhile
+            (set! *df-prewarm-level* (if (and far (!= far now) (!= far next)) far (the-as symbol #f)))
+            )
           )
-        (set! next (df-district-at ahead))
         )
       (if (= next now)
           (set! next #f)
           )
+      ;; a new "next" has to hold for a few decisions before it replaces the old one
+      (cond
+        ((= next *df-stream-cand*)
+         (set! *df-stream-cand-n* (+ *df-stream-cand-n* 1))
+         )
+        (else
+          (set! *df-stream-cand* next)
+          (set! *df-stream-cand-n* 1)
+          )
+        )
+      (if (and (!= next *df-stream-next*) (< *df-stream-cand-n* *df-stream-settle*) (!= *df-stream-next* now))
+          (set! next *df-stream-next*)
+          )
+      (when (and now (!= now *df-stream-now*))
+        (set! *df-stream-prev* *df-stream-now*)
+        )
       (set! *df-stream-now* now)
       (set! *df-stream-next* next)
       (let ((keep (new 'stack-no-clear 'array 'symbol 6))
@@ -2895,13 +2928,28 @@
               )
             )
           )
-        ;; districts, most important first, as many as fit
+        ;; districts, most important first, as many as fit. The second slot is the district
+        ;; ahead; with nothing new ahead it keeps whatever district it already holds (no flip-flop
+        ;; when the look-ahead point wobbles across a boundary), else the district just left.
         (let ((allowed (- 2 real-others))
               (cands (new 'stack-no-clear 'array 'symbol 3))
+              (second (the-as symbol #f))
               )
+          (cond
+            (next
+              (set! second next)
+              )
+            ((and *df-stream-second* (!= *df-stream-second* now))
+             (set! second *df-stream-second*) ;; ours from last time, not one a region slipped in
+             )
+            (else
+              (set! second *df-stream-prev*)
+              )
+            )
+          (set! *df-stream-second* second)
           (set! (-> cands 0) now)
-          (set! (-> cands 1) (if (member cur *df-city-districts*) cur (the-as symbol #f)))
-          (set! (-> cands 2) next)
+          (set! (-> cands 1) second)
+          (set! (-> cands 2) #f)
           (dotimes (i 3)
             (let ((d (-> cands i)))
               (when (and d (< 0 allowed) (< n 6))
@@ -2962,7 +3010,10 @@
                   (want-display-level *load-state* (-> keep i) 'display)
                   )
               )
-            (df-lvl-log "stream" now cur next)
+            (if *df-stream-log?*
+                (format 0 "LVL ~D ~D stream ~A ~A ~,,0M ~,,0M~%" (-> *display* real-clock frame-counter)
+                        (/ (the int (get-cpu-clock)) 300000) now next (-> pos x) (-> pos z))
+                )
             )
           )
         )
@@ -2987,6 +3038,7 @@
    district displayed (display is normally switched on by regions at the gates, which flight
    skips: the district sat in memory undrawn and you saw a dark cliff)."
   (set! *df-air-frame* (-> *display* real-clock frame-counter))
+  (set! *df-vis-from-air?* #t) ;; new districts draw fully from the air (cam-update.gc)
   (set! *df-stream-timer* (+ *df-stream-timer* 1))
   (when (<= *df-stream-every* *df-stream-timer*)
     (set! *df-stream-timer* 0)
@@ -3016,8 +3068,9 @@
         )
   (when *df-in-city?*
     (dark-flight-city-tick)
-    ;; the ceiling of the district Jak is actually over (current-level can lag behind in flight)
-    (let ((nm (symbol->string (-> self current-level name))))
+    ;; the ceiling of the district Jak is actually over (current-level lags far behind in flight;
+    ;; the streamer's continue-point lookup is current)
+    (let ((nm (symbol->string (if *df-stream-now* *df-stream-now* (-> self current-level name)))))
       (set! *df-city-ceiling* (cond
                                 ((string-prefix= "ctyport" nm) *df-ceil-port*)
                                 ((string-prefix= "ctyinda" nm) *df-ceil-inda*)
@@ -3049,9 +3102,10 @@
           (set! (-> self control transv y) (* vs (fmax 0.0 (- 1.0 (/ above *df-city-soft*)))))
           )
       )
+    ;; above the ceiling (a lower district's, crossed at height): ease down, never slam
     (let ((over (- (-> self control trans y) *df-city-ceiling*)))
       (if (< 0.0 over)
-          (set! (-> self control transv y) (fmin (-> self control transv y) (* -2.0 over)))
+          (set! (-> self control transv y) (fmin (-> self control transv y) (fmax (meters -12) (* -2.0 over))))
           )
       )
     )
@@ -3064,7 +3118,7 @@
 ;; dark sparks and lightning, with a small dark-bomb hit sphere, rumble and a camera jolt. Holding
 ;; R1 still boosts as before.
 (define *df-dash-speed*    (meters 55))
-(define *df-dash-city-speed* (meters 45)) ;; in the city (the districts can't stream faster)
+(define *df-dash-city-speed* (meters 55)) ;; in the city (same as outside; the districts stream fast enough now)
 (define *df-dash-time*     (seconds 0.3))
 (define *df-dash-cooldown* (seconds 0.6))
 (define *df-dash-start*    (the-as time-frame 0))

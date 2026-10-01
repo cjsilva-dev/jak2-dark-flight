@@ -3022,9 +3022,10 @@ into 7 sections, which might explain the weird sizes in the center.
       )
     ;; DARK FLIGHT MOD: the renderer used to hear about a level only once its DGO had loaded and
     ;; logged in, then read and uploaded the level's .fr3 after that. Name every wanted level
-    ;; too, so the .fr3 streams in while the DGO is still loading (or queued behind another).
-    (dotimes (w LEVEL_MAX)
-      (let ((nm (-> *load-state* want w name)))
+    ;; too, so the .fr3 streams in while the DGO is still loading (or queued behind another),
+    ;; plus the one the flight code expects after that (a free renderer slot, nothing else).
+    (dotimes (w (+ LEVEL_MAX 1))
+      (let ((nm (if (< w LEVEL_MAX) (-> *load-state* want w name) *df-prewarm-level*)))
         (when nm
           (let ((s (symbol->string nm))
                 (have #f)
