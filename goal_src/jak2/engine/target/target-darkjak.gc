@@ -2749,6 +2749,7 @@
 (define *df-stream-settle* 3)              ;; decisions in a row a new "next" needs before it counts
 (define *df-stream-cand* #f)               ;; the "next" being considered, and for how long
 (define *df-stream-cand-n* 0)
+(define *df-stream-last-frame* 0)       ;; when the last decision ran
 (define *df-stream-every* 6)               ;; frames between decisions
 (define *df-air-frame* 0)                  ;; last frame the flight code ran (the want hook checks it)
 (define *df-stream-now* #f)                ;; the district Jak is over
@@ -2884,6 +2885,14 @@
       (if (= next now)
           (set! next #f)
           )
+      ;; after a teleport or a long walk the remembered districts are stale: forget them
+      (when (< 120 (- (-> *display* real-clock frame-counter) *df-stream-last-frame*))
+        (set! *df-stream-prev* #f)
+        (set! *df-stream-second* #f)
+        (set! *df-stream-cand* #f)
+        (set! *df-stream-next* #f)
+        )
+      (set! *df-stream-last-frame* (-> *display* real-clock frame-counter))
       ;; a new "next" has to hold for a few decisions before it replaces the old one
       (cond
         ((= next *df-stream-cand*)
