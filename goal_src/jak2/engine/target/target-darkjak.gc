@@ -2745,7 +2745,7 @@
 (define *df-stream-ahead* 2.5)             ;; seconds of flight the next area is picked ahead...
 (define *df-stream-ahead-min* (meters 100)) ;; ...at least this far, at most *df-stream-ahead-max*
 (define *df-stream-ahead-max* (meters 250)) ;; (the half-way point is checked first so none is skipped)
-(define *df-stream-settle* 3)              ;; decisions in a row a new "next" needs before it counts
+(define *df-stream-settle* 5)              ;; decisions in a row a new "next" needs before it counts
 (define *df-stream-every* 6)               ;; frames between decisions
 (define *df-stream-reach* (meters 400))    ;; no continue point this close: not a streamed area, hands off
 (define *df-air-frame* 0)                  ;; last frame the flight code ran (the want hook checks it)
@@ -2918,7 +2918,7 @@
   )
 
 (define *df-stream-present-only?* #t) ;; "here" = a loaded level's continue; cleared for the fallback
-(define *df-stream-spread* (meters 60)) ;; an area's continue points are spread out; an interior's cluster at its door
+(define *df-stream-spread* (meters 75)) ;; an area's continue points are spread out; an interior's cluster at its door
 
 (defun df-outdoor-level? ((name symbol))
   "An area you fly across (a district, Spargus, the arena) rather than an interior: it has at
@@ -3030,6 +3030,83 @@
     )
   )
 
+(defun df-nearest-continue-of ((pos vector) (level symbol))
+  "The nearest continue point (3D) belonging to LEVEL, any distance."
+  (let ((best (the-as continue-point #f))
+        (bestd 0.0)
+        (info (lookup-level-info level))
+        )
+    (when info
+      (let ((cl (-> info continues)))
+        (while (not (null? cl))
+          (let ((c (the-as continue-point (car cl))))
+            (when (< 1 (df-want-named c))
+              (let* ((dx (- (-> c trans x) (-> pos x)))
+                     (dy (- (-> c trans y) (-> pos y)))
+                     (dz (- (-> c trans z) (-> pos z)))
+                     (d (+ (* dx dx) (* dy dy) (* dz dz)))
+                     )
+                (when (or (not best) (< d bestd))
+                  (set! best c)
+                  (set! bestd d)
+                  )
+                )
+              )
+            )
+          (set! cl (cdr cl))
+          )
+        )
+      )
+    best
+    )
+  )
+
+(defun df-level-under ((pos vector))
+  "The loaded area Jak is in: among the loaded, outdoor, normally displayed levels whose first
+   drawable tree's sphere contains pos, the one with the nearest continue point (neighbouring
+   spheres overlap a lot). #f when none."
+  (let ((best (the-as symbol #f))
+        (bestd 0.0)
+        )
+    (dotimes (i LEVEL_MAX)
+      (let ((lv (-> *level* level i)))
+        (when (and (or (= (-> lv status) 'active) (= (-> lv status) 'alive) (= (-> lv status) 'loaded))
+                   (!= (-> lv display?) 'special)
+                   (-> lv bsp)
+                   (nonzero? (-> lv bsp drawable-trees))
+                   (< 0 (-> lv bsp drawable-trees length))
+                   (not (df-stream-skip-level? (-> lv name)))
+                   (!= (-> lv name) 'ctywide)
+                   (df-outdoor-level? (-> lv name))
+                   )
+          (let* ((c (-> lv bsp drawable-trees trees 0 bsphere))
+                 (dx (- (-> pos x) (-> c x)))
+                 (dz (- (-> pos z) (-> c z)))
+                 )
+            (when (< (sqrtf (+ (* dx dx) (* dz dz))) (-> c w))
+              (let ((cp (df-nearest-continue-of pos (-> lv name))))
+                (when cp
+                  (let* ((ex (- (-> cp trans x) (-> pos x)))
+                         (ey (- (-> cp trans y) (-> pos y)))
+                         (ez (- (-> cp trans z) (-> pos z)))
+                         (d (+ (* ex ex) (* ey ey) (* ez ez)))
+                         )
+                    (when (or (not best) (< d bestd))
+                      (set! best (-> lv name))
+                      (set! bestd d)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
 (defun df-stream-add ((keep (pointer symbol)) (disp (pointer symbol)) (n int) (name symbol) (d symbol))
   "Append name (with its display flag) to the keep list unless it's there, excluded or just failed."
   (when (and name
@@ -3065,7 +3142,10 @@
            (ahead (new-stack-vector0))
            (cnow (begin
                    (set! *df-stream-present-only?* #t)
-                   (let ((c (df-nearest-continue pos (the-as symbol #f))))
+                   (let ((c (let ((under (df-level-under pos)))
+                              (if under
+                                  (df-nearest-continue-of pos under) ;; geometry says where we are
+                                  (df-nearest-continue pos (the-as symbol #f))))))
                      (when (not c)
                        ;; flown out of every loaded level's reach: take the nearest spot of any
                        ;; level, which then gets loaded as "here"
