@@ -2827,7 +2827,13 @@
   )
 
 (defun df-want-count ((c continue-point))
-  "How many levels this continue point's set names (Jak 2 stores a fixed array of 6)."
+  "Slots in this continue point's level set (Jak 2 stores a fixed array of 6; empty slots are #f
+   and can sit between named ones, so callers skip #f names)."
+  6
+  )
+
+(defun df-want-named ((c continue-point))
+  "How many levels this continue point's set actually names."
   (let ((n 0))
     (dotimes (i 6)
       (if (-> c want i name)
@@ -2867,6 +2873,87 @@
     )
   )
 
+(defun df-level-links? ((a symbol) (b symbol))
+  "Do the game's continue points connect levels A and B: any continue of A lists B, or any
+   continue of B lists A? (Checked per level, not per continue: the nearest continue of a
+   district may be an interior's door, whose list says nothing about the next district.)"
+  (let ((yes #f))
+    (let ((ia (lookup-level-info a))
+          (ib (lookup-level-info b)))
+      (when ia
+        (let ((cl (-> ia continues)))
+          (while (and (not (null? cl)) (not yes))
+            (if (df-continue-wants? (the-as continue-point (car cl)) b)
+                (set! yes #t)
+                )
+            (set! cl (cdr cl))
+            )
+          )
+        )
+      (when (and ib (not yes))
+        (let ((cl (-> ib continues)))
+          (while (and (not (null? cl)) (not yes))
+            (if (df-continue-wants? (the-as continue-point (car cl)) a)
+                (set! yes #t)
+                )
+            (set! cl (cdr cl))
+            )
+          )
+        )
+      )
+    yes
+    )
+  )
+
+(defun df-continue-preloads? ((c continue-point) (name symbol))
+  "Does this continue point list NAME undisplayed (loaded for the door, not a place to be)?"
+  (let ((yes #f))
+    (dotimes (i (df-want-count c))
+      (if (and (= (-> c want i name) name) (not (-> c want i display?)))
+          (set! yes #t)
+          )
+      )
+    yes
+    )
+  )
+
+(define *df-stream-present-only?* #t) ;; "here" = a loaded level's continue; cleared for the fallback
+(define *df-stream-spread* (meters 60)) ;; an area's continue points are spread out; an interior's cluster at its door
+
+(defun df-outdoor-level? ((name symbol))
+  "An area you fly across (a district, Spargus, the arena) rather than an interior: it has at
+   least two continue points more than *df-stream-spread* apart. Interiors (the hiphog, the gun
+   course, the construction site) sit in the district lists too, at their doors, but their
+   continues cluster there, and a wasted slot on one leaves no room for the district ahead."
+  (let ((info (lookup-level-info name))
+        (yes #f)
+        )
+    (when info
+      (let ((cl (-> info continues)))
+        (while (and (not (null? cl)) (not yes))
+          (let ((a (the-as continue-point (car cl)))
+                (cl2 (cdr cl))
+                )
+            (while (and (not (null? cl2)) (not yes))
+              (let* ((b (the-as continue-point (car cl2)))
+                     (dx (- (-> a trans x) (-> b trans x)))
+                     (dz (- (-> a trans z) (-> b trans z)))
+                     )
+                (if (< (* *df-stream-spread* *df-stream-spread*) (+ (* dx dx) (* dz dz)))
+                    (set! yes #t)
+                    )
+                )
+              (set! cl2 (cdr cl2))
+              )
+            )
+          (set! cl (cdr cl))
+          )
+        )
+      )
+    yes
+    )
+  )
+
 (defun df-nearest-continue ((pos vector) (near symbol))
   "The continue point nearest to pos, skipping dev levels and continues that don't list a real
    level set (ctyfence-start wants only itself, and ctyfence has no file). With NEAR, only
@@ -2885,15 +2972,16 @@
           (let ((cl (-> (the-as level-load-info info) continues)))
             (while (not (null? cl))
               (let ((c (the-as continue-point (car cl))))
-                (when (and (< 1 (df-want-count c))
+                (when (and (< 1 (df-want-named c))
                            (-> c level)
                            (not (df-stream-skip-level? (-> c level)))
+                           (df-outdoor-level? (-> c level))
                            (if near
                                (or (= (-> c level) near)
-                                   (df-continue-wants? c near)
-                                   (and *df-stream-cnow* (df-continue-wants? *df-stream-cnow* (-> c level)))
+                                   (df-level-links? near (-> c level))
                                    )
-                               (df-level-present? (-> c level)) ;; the spot we're at: a level we have
+                               (or (not *df-stream-present-only?*)
+                                   (df-level-present? (-> c level))) ;; the spot we're at: a level we have
                                )
                            )
                   (let* ((dx (- (-> c trans x) (-> pos x)))
@@ -2975,7 +3063,19 @@
            (v (-> *target* control transv))
            (sp (vector-xz-length v))
            (ahead (new-stack-vector0))
-           (cnow (df-nearest-continue pos (the-as symbol #f)))
+           (cnow (begin
+                   (set! *df-stream-present-only?* #t)
+                   (let ((c (df-nearest-continue pos (the-as symbol #f))))
+                     (when (not c)
+                       ;; flown out of every loaded level's reach: take the nearest spot of any
+                       ;; level, which then gets loaded as "here"
+                       (set! *df-stream-present-only?* #f)
+                       (set! c (df-nearest-continue pos (the-as symbol #f)))
+                       (set! *df-stream-present-only?* #t)
+                       )
+                     c
+                     )
+                   ))
            (cnext (the-as continue-point #f))
            (failed? (and *df-stream-failed*
                          (< (- (-> *display* real-clock frame-counter) *df-stream-failed-frame*) (seconds 3))))
