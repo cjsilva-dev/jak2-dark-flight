@@ -2,24 +2,11 @@
 (in-package goal)
 
 ;; name: flight-stream-h.gc (Jak 2 / Dark Flight)
-;; Everything flight-stream.gc needs to know about this game. Keep flight-stream.gc itself identical
-;; to the one in the jak3-true-flight repo.
+;; Everything flight-stream.gc needs to know about this game, apart from the ground map
+;; (flight-map.gc, generated). Keep flight-stream.gc itself identical to the one in the
+;; jak3-true-flight repo.
 
-(defconstant FS-SLOTS 6) ;; slots in *load-state* want and in a continue point's level set
-
-;; a continue point's level set: Jak 2 stores a fixed array of 6, empty slots are #f
-(defmacro fs-want-slots (c) 6)
-(defun fs-want-named ((c continue-point))
-  "How many levels this continue point's set actually names."
-  (let ((n 0))
-    (dotimes (i 6)
-      (if (-> c want i name)
-          (set! n (+ n 1))
-          )
-      )
-    n
-    )
-  )
+(defconstant FS-SLOTS 6) ;; slots in *load-state* want
 
 (defun fs-borrow-mode? ((info level-load-info))
   (= (-> info memory-mode) (load-buffer-mode borrow))
@@ -27,20 +14,15 @@
 (defun fs-alias-mode? ((info level-load-info))
   #f ;; Jak 2 has no alias levels
   )
-(defun fs-edge-mode? ((info level-load-info))
-  (or (= (-> info memory-mode) (load-buffer-mode small-edge))
-      (= (-> info memory-mode) (load-buffer-mode small-center))
-      )
-  )
 (defun fs-master-level ((info level-load-info))
   (the-as symbol #f) ;; Jak 2 has no master levels
   )
-
-;; dev/cutscene levels whose continue points sit in the world: never used, never wanted
-(define *fs-stream-exclude* '(ctyfence test-zone title intro introcst demo halfpipe skatepark
-                              chartest dptest eitest miketest tatetest tobytest teststdc teststdd vistest woodstest andrew01 4aaron 4pal01))
-;; areas that stream by position on their own: none in Jak 2
-(define *fs-stream-skip-prefixes* '())
+(defun fs-wide-level? ((name symbol))
+  "A level that spans a whole mapped area and must stay while Jak is anywhere in it. Haven's is
+   ctywide; it is in the level set of nearly every city checkpoint, but not of all of them, so it
+   can't be derived."
+  (= name 'ctywide)
+  )
 
 (defun fs-city-mission? ()
   "A city mission level is wanted (its actors are the mission): leave the level list alone."

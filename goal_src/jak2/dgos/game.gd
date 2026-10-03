@@ -315,6 +315,7 @@
   "target-swim.o"
   "target-carry.o"
   "flight-stream-h.o"
+  "flight-map.o"
   "flight-stream.o"
   "target-darkjak.o"
   "target-death.o"
