@@ -416,7 +416,7 @@ into 7 sections, which might explain the weird sizes in the center.
    This function is the way to transition from loaded to alive/active."
 
   (start-debug "level-status-update trying to do ~A to ~A for ~A~%" (-> this status) arg0 (-> this name))
-  (df-lvl-log "req" (-> this name) arg0 (-> this status))
+  (fs-lvl-log "req" (-> this name) arg0 (-> this status))
   (case arg0
     (('inactive)
      ;; any request to go inactive should unload.
@@ -488,7 +488,7 @@ into 7 sections, which might explain the weird sizes in the center.
               (set! (-> this texture-mask v1-46 mask quad) (the-as uint128 0))
               )
             (set! (-> this status) 'active)
-            (df-lvl-log "active" (-> this name) #f #f)
+            (fs-lvl-log "active" (-> this name) #f #f)
             ;; set up for drawing.
             (assign-draw-indices *level*)
             )
@@ -574,7 +574,7 @@ into 7 sections, which might explain the weird sizes in the center.
     (when (nonzero? (link-resume)) ;; run linker
       ;; linker return is nonzero, we're done!
       (start-debug "link done!~%")
-      (df-lvl-log "linked" (-> this name) (-> this status) #f)
+      (fs-lvl-log "linked" (-> this name) (-> this status) #f)
       (set! (-> this linking) #f)
       (case (-> this status)
         (('loading) ;; we're loading to b0/b1, not the top buffer
@@ -637,7 +637,7 @@ into 7 sections, which might explain the weird sizes in the center.
      (let ((s5-0 (dgo-load-get-next (& sv-16))))
        (when s5-0
          ;; we got something! remember where and update stats
-         (if *df-stream-log?*
+         (if *fs-stream-log?*
              (format 0 "LVL ~D ~D obj ~A ~g ~D~%"
                      (-> *display* real-clock frame-counter)
                      (/ (the int (get-cpu-clock)) 300000)
@@ -729,14 +729,14 @@ into 7 sections, which might explain the weird sizes in the center.
 ;; DARK FLIGHT: on PC a DGO object arrives every time load-continue is called, but the game only
 ;; calls it a few times a frame, so a district's 10-15 objects took 10-15 frames. Keep calling
 ;; while the DGO is still coming, within a small time budget per call site.
-(define *df-load-budget-ms* 2.5)
+(define *fs-load-budget-ms* 2.5)
 (defun load-continue-pc ((lev level))
   (load-continue lev)
-  (when (and (< 0.0 *df-load-budget-ms*)
-             (< (-> *display* real-clock frame-counter) *df-fast-load-until*)
+  (when (and (< 0.0 *fs-load-budget-ms*)
+             (< (-> *display* real-clock frame-counter) *fs-fast-load-until*)
              (!= lev (-> *level* default-level)))
     (let ((start (the int (get-cpu-clock)))
-          (limit (the int (* 300000.0 *df-load-budget-ms*)))
+          (limit (the int (* 300000.0 *fs-load-budget-ms*)))
           )
       (while (and (or (= (-> lev status) 'loading) (= (-> lev status) 'loading-bt))
                   (< (- (the int (get-cpu-clock)) start) limit)
@@ -959,8 +959,8 @@ into 7 sections, which might explain the weird sizes in the center.
              ;; DARK FLIGHT MOD: the original stopped the game here (break!). On PC a level that
              ;; doesn't fit just isn't loaded: forget the want, remember the failure for the
              ;; flight streamer, and leave this slot inactive.
-             (set! *df-stream-failed* (-> this name))
-             (set! *df-stream-failed-frame* (-> *display* real-clock frame-counter))
+             (set! *fs-stream-failed* (-> this name))
+             (set! *fs-stream-failed-frame* (-> *display* real-clock frame-counter))
              (let ((names (new 'stack-no-clear 'array 'symbol 10))
                    (n 0))
                (dotimes (i 10)
@@ -1080,7 +1080,7 @@ into 7 sections, which might explain the weird sizes in the center.
              (s4-1 (kmalloc (-> this heap) s3-1 (kmalloc-flags align-64 top) "dgo-level-buf-2"))
              (s5-4 (kmalloc (-> this heap) s3-1 (kmalloc-flags align-64 top) "dgo-level-buf-2"))
              )
-        (df-lvl-log "load-begin" (-> this name) #f #f)
+        (fs-lvl-log "load-begin" (-> this name) #f #f)
     (format 0 "-----------> begin load ~A [~S]~%" (-> this load-name) *temp-string*)
         (set! (-> this load-buffer 0) (the-as uint s5-4))
         (set! (-> this load-buffer 1) (the-as uint s4-1))
@@ -1099,7 +1099,7 @@ into 7 sections, which might explain the weird sizes in the center.
 (defmethod login-begin ((this level))
   "Begin login of a level after linking.
    The login is spread over multiple frames."
-  (df-lvl-log "login-begin" (-> this name) #f #f)
+  (fs-lvl-log "login-begin" (-> this name) #f #f)
 
   ;; link done, revert allocate-func back to "normal".
   (set! (-> *texture-pool* allocate-func) texture-page-default-allocate)
@@ -1459,7 +1459,7 @@ into 7 sections, which might explain the weird sizes in the center.
   ;; end the load
   (set! (-> lev draw-priority) (-> lev info draw-priority))
   (set! (-> lev status) 'loaded)
-  (df-lvl-log "loaded" (-> lev name) #f #f)
+  (fs-lvl-log "loaded" (-> lev name) #f #f)
   (mark-hud-warp-sprite-dirty *texture-pool*)
   (set! loading-level global)
   (set! (-> *level* loading-level) (-> *level* default-level))
@@ -1502,7 +1502,7 @@ into 7 sections, which might explain the weird sizes in the center.
            )
          (birth (-> this bsp))
          (set! (-> this status) 'alive)
-         (df-lvl-log "alive" (-> this name) #f #f)
+         (fs-lvl-log "alive" (-> this name) #f #f)
          (set! (-> this render?) #t)
 
          (copy-perms-to-level! *game-info* this)
@@ -1553,7 +1553,7 @@ into 7 sections, which might explain the weird sizes in the center.
 
 (defmethod deactivate ((this level))
   "Take a level out of active/alive"
-  (df-lvl-log "deactivate" (-> this name) (-> this status) #f)
+  (fs-lvl-log "deactivate" (-> this name) (-> this status) #f)
   (case (-> this status)
     (('active 'alive)
      (format 0 "----------- kill ~A (status ~A)~%" this (-> this status))
@@ -1615,7 +1615,7 @@ into 7 sections, which might explain the weird sizes in the center.
 
 (defmethod unload! ((this level))
   "Unload a level."
-  (df-lvl-log "unload" (-> this name) (-> this status) #f)
+  (fs-lvl-log "unload" (-> this name) (-> this status) #f)
 
   ;; make sure it's not alive/active
   (deactivate this)
@@ -2493,7 +2493,7 @@ into 7 sections, which might explain the weird sizes in the center.
                       (< 1 (- (-> *display* real-clock integral-frame-counter) *dgo-time*)))
               (let ((lev-to-unload (-> *level* level unload-idx)))
                 (format 0 "Discarding level ~A~%" (-> lev-to-unload name))
-                (df-lvl-log "discard" (-> lev-to-unload name) (-> lev-to-unload status) #f)
+                (fs-lvl-log "discard" (-> lev-to-unload name) (-> lev-to-unload status) #f)
                 (level-status-update! lev-to-unload 'inactive) ;; kill it.
                 )
               )
@@ -2557,7 +2557,7 @@ into 7 sections, which might explain the weird sizes in the center.
             ;; and dgo is busy, we at least start the load.
             (when (and (or no-levels-at-all (not (check-busy *load-dgo-rpc*))) (not (load-in-progress? *level*)))
               (format 0 "Adding level ~A~%" (-> this want want-lev-idx-to-load name))
-              (df-lvl-log "add" (-> this want want-lev-idx-to-load name) #f #f)
+              (fs-lvl-log "add" (-> this want want-lev-idx-to-load name) #f #f)
 
               ;; do the actual level assignment
               (let ((new-lev (level-get-for-use *level* (-> this want want-lev-idx-to-load name) 'loaded)))
@@ -3046,7 +3046,7 @@ into 7 sections, which might explain the weird sizes in the center.
     ;; too, so the .fr3 streams in while the DGO is still loading (or queued behind another),
     ;; plus the one the flight code expects after that (a free renderer slot, nothing else).
     (dotimes (w (+ LEVEL_MAX 1))
-      (let ((nm (if (< w LEVEL_MAX) (-> *load-state* want w name) *df-prewarm-level*))
+      (let ((nm (if (< w LEVEL_MAX) (-> *load-state* want w name) *fs-prewarm-level*))
             (info (the-as level-load-info #f)))
         (if nm
             (set! info (lookup-level-info nm))

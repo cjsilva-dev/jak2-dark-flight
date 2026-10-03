@@ -11,27 +11,27 @@
 ;; total amount of levels, including ones outside level heap (default-level)
 (defconstant LEVEL_TOTAL 7)
 
-;; DARK FLIGHT: streaming log. One line per level event, with the frame counter and a
+;; FLIGHT STREAMER: log. One line per level event, with the frame counter and a
 ;; millisecond clock, so a level load can be timed stage by stage from the game log.
-(define *df-stream-log?* #f)
+(define *fs-stream-log?* #f)
 ;; While flying in the city the flight code owns the district wants (target-darkjak.gc). Every
 ;; want-levels call (the gate trigger regions) runs this hook afterwards, so the districts are
 ;; re-decided in the same frame instead of thrashing against the regions.
-(define *df-want-levels-hook* (the-as (function none) #f))
-(define *df-in-want-hook?* #f)
+(define *fs-want-levels-hook* (the-as (function none) #f))
+(define *fs-in-want-hook?* #f)
 ;; Until this frame counter, level loads are drained as fast as the DGO arrives (set by the flight
 ;; code while flying in the city). Elsewhere the game keeps its one-object-per-call pacing: at
 ;; boot, for one, the gamefont must be the last thing in the texture pool when it's removed.
-(define *df-fast-load-until* 0)
+(define *fs-fast-load-until* 0)
 ;; The last level that didn't fit the level heap (load-begin gives up on it instead of crashing),
 ;; and when: the flight streamer leaves it alone for a while.
-(define *df-stream-failed* (the-as symbol #f))
-(define *df-stream-failed-frame* 0)
+(define *fs-stream-failed* (the-as symbol #f))
+(define *fs-stream-failed-frame* 0)
 ;; A level the flight code expects soon: its .fr3 is handed to the renderer early (level.gc) so
 ;; it's in the renderer's cache before the game asks for it. Not loaded by the game.
-(define *df-prewarm-level* (the-as symbol #f))
-(defun df-lvl-log ((ev string) (name symbol) (a symbol) (b symbol))
-  (if *df-stream-log?*
+(define *fs-prewarm-level* (the-as symbol #f))
+(defun fs-lvl-log ((ev string) (name symbol) (a symbol) (b symbol))
+  (if *fs-stream-log?*
       (format 0 "LVL ~D ~D ~S ~A ~A ~A~%"
               (-> *display* real-clock frame-counter)
               (/ (the int (get-cpu-clock)) 300000)
