@@ -37,3 +37,7 @@
     m
     )
   )
+
+(defun fs-self-streamed-area? ()
+  #f ;; no area of Jak 2 streams itself by position
+  )
