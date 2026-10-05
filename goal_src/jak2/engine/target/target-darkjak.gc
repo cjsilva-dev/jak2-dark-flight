@@ -2547,6 +2547,13 @@
 (define *df-slam-blast-scale* 0.0)  ;; target radius of this blast
 (define *df-slam-bomb-cur* (new 'static 'array float 1)) ;; the collision radius as it grows (the
                                                         ;; bomb helper takes a pointer to it)
+;; The slam opens with the ground-pound flip, then goes into the dark bomb's dive pose: True Flight's
+;; sequence (there the flip covers an animation-set swap; here it is only for the look).
+(define *df-slam-flip?* #t)
+(define *df-slam-flip-anim* 52)             ;; jakb-flop-down-ja
+(define *df-slam-flip-max* (seconds 0.5))   ;; into the dive pose by then even if the flip isn't done
+(define *df-slam-flip-min-height* (meters 8)) ;; closer to the ground than this: no time for it, dive at once
+(define *df-slam-flipping?* #f)
 
 (defbehavior dark-flight-slam-anim target ((idx int) (blend time-frame))
   "Start jakb art slot IDX if it is loaded (a missing animation crashes). #t if started."
@@ -2618,7 +2625,18 @@
     (fs-tick)
     )
   :code (behavior ()
-    (dark-flight-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
+    ;; the flip first, unless the ground is right there (the height is only trusted near the ground:
+    ;; high up the probe misses and reads 0, which is fine here, it means "far")
+    (let ((h (target-height-above-ground)))
+      (set! *df-slam-flipping?* (and *df-slam-flip?*
+                                     (not (and (< 1024.0 h) (< h *df-slam-flip-min-height*)))
+                                     (dark-flight-slam-anim *df-slam-flip-anim* (seconds 0.1))
+                                     )
+            )
+      )
+    (if (not *df-slam-flipping?*)
+        (dark-flight-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
+        )
     (set! *df-slam-impact* *df-slam-speed*)
     (until (or (logtest? (-> self control status) (collide-status on-surface))
                ;; landed on something that never counts as ground (a tree crown): stopped falling
@@ -2639,9 +2657,17 @@
         (vector+float*! (-> self control transv) (-> self control transv) up (- want vs))
         (set! *df-slam-impact* (- want))
         )
+      ;; flip finished (or it has had its time): into the dark bomb's dive pose
+      (when (and *df-slam-flipping?*
+                 (or (ja-done? 0) (time-elapsed? (-> self state-time) *df-slam-flip-max*))
+                 )
+        (dark-flight-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
+        (set! *df-slam-flipping?* #f)
+        )
       (suspend)
       (ja :num! (seek!)) ;; play once and hold the end pose (looping it rocked back and forth)
       )
+    (set! *df-slam-flipping?* #f)
     (set-forward-vel 0.0)
     (let ((k (lerp-scale 0.0 1.0 *df-slam-impact* *df-slam-speed* *df-slam-max*)))
       (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 255 (the-as time-frame (the int (lerp 45.0 270.0 k))))
