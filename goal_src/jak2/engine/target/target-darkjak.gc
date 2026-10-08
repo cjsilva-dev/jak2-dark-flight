@@ -2206,7 +2206,6 @@
 ;; Values both games share (glide, turbo, dash, landing, Dark Jak's flap) are in flight-core.gc.
 (define *df-glide-hold*        (seconds 0.25)) ;; how long L1 must stay held after a tap to glide
 (define *df-turbo-window*      (seconds 0.5))  ;; R1 turbo lasts this long after each flap (1.2 s flung Jak on after the last flap)
-(define *df-safe-fall?*        #f)             ;; flew since last standing on something: no fall damage
 (define *df-fly-turbo-accel*   (meters 25))    ;; flapping turbo in the city: driven directly (the
 (define *df-fly-turbo-max*     (meters 45))    ;; surface's own easing only reached ~25 m/s)
 (define *df-fly-turbo-accel-open* (meters 40)) ;; ... and outside the city
@@ -2422,14 +2421,7 @@
    list of states to fold in, not of states to fly in: Jak has many airborne states (ledge jumps,
    pole flips, roll flips...), and folding in every one not listed broke flying after a ledge."
   ;; no fall damage between a flight and the next landing, even if the wings were folded mid-air
-  (cond
-    ((logtest? (-> self control status) (collide-status on-surface on-ground))
-     (set! *df-safe-fall?* #f)
-     )
-    (*df-safe-fall?*
-      (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
-      )
-    )
+  (fc-safe-fall-tick) ;; no fall damage between a flight and the next landing (flight-core.gc)
   (when (and (or *dark-wings-out?* *dark-wings-want?* *dark-flight-cam?*)
              (or (focus-test? self dead grabbed pilot board mech)
                  (not (focus-test? self dark))
@@ -2521,16 +2513,6 @@
 (define *df-slam-flip-min-height* (meters 8)) ;; closer to the ground than this: no time for it, dive at once
 (define *df-slam-flipping?* #f)
 
-(defbehavior dark-flight-slam-anim target ((idx int) (blend time-frame))
-  "Start jakb art slot IDX if it is loaded (a missing animation crashes). #t if started."
-  (let ((a (-> self draw art-group data idx)))
-    (when a
-      (ja-channel-push! 1 blend)
-      (ja-no-eval :group! (the-as art-joint-anim a) :num! (seek!) :frame-num 0.0)
-      #t
-      )
-    )
-  )
 
 (defstate target-darkjak-slam (target)
   :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
@@ -2596,12 +2578,12 @@
     (let ((h (target-height-above-ground)))
       (set! *df-slam-flipping?* (and *df-slam-flip?*
                                      (not (and (< 1024.0 h) (< h *df-slam-flip-min-height*)))
-                                     (dark-flight-slam-anim *df-slam-flip-anim* (seconds 0.1))
+                                     (fc-slam-anim *df-slam-flip-anim* (seconds 0.1))
                                      )
             )
       )
     (if (not *df-slam-flipping?*)
-        (dark-flight-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
+        (fc-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
         )
     (set! *df-slam-impact* *fc-slam-speed*)
     (until (or (logtest? (-> self control status) (collide-status on-surface))
@@ -2627,7 +2609,7 @@
       (when (and *df-slam-flipping?*
                  (or (ja-done? 0) (time-elapsed? (-> self state-time) *df-slam-flip-max*))
                  )
-        (dark-flight-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
+        (fc-slam-anim 417 (seconds 0.1)) ;; jakb-darkjak-bomb-loop-ja
         (set! *df-slam-flipping?* #f)
         )
       (suspend)
@@ -2640,7 +2622,7 @@
       (activate! *camera-smush-control* (lerp 300.0 2400.0 k) 15 (the int (lerp 40.0 120.0 k)) 1.0 0.9 (-> *display* camera-clock))
       (set! *df-slam-impact* k)
       )
-    (if (not (dark-flight-slam-anim 418 (seconds 0.05))) ;; jakb-darkjak-bomb-land-ja
+    (if (not (fc-slam-anim 418 (seconds 0.05))) ;; jakb-darkjak-bomb-land-ja
         (go target-stance)
         )
     ;; ---- the dark bomb blast (from target-darkjak-bomb0), radius scaled by the drop ----
@@ -2870,20 +2852,7 @@
       (launch-particles (-> *part-id-table* 178) (process-drawable-random-point! self (new 'stack-no-clear 'vector)))
       )
     ;; the hit
-    (let ((prev (-> self control danger-mode)))
-      (set! (-> self control bomb-scale) *fc-dash-hit-scale*)
-      (target-danger-set! 'bomb #f)
-      (update-transforms (-> self control))
-      (let ((a1 (new 'stack-no-clear 'overlaps-others-params)))
-        (set! (-> a1 options) (overlaps-others-options))
-        (set! (-> a1 collide-with-filter) (the-as collide-spec -1))
-        (set! (-> a1 tlist) *touching-list*)
-        (find-overlapping-shapes (-> self control) a1)
-        )
-      (set! (-> self control bomb-scale) 0.0)
-      (target-danger-set! prev #f)
-      (update-transforms (-> self control))
-      )
+    (fc-dash-hit)
     )
   (none)
   )
@@ -2944,7 +2913,7 @@
         ;; a steady weight, heavier than Light Jak's flight (no extra drop after flapping stops)
         (set! (-> self control dynam gravity-length) *fc-dark-gravity*)
         (set! (-> self control dynam gravity-max) FC-GRAVITY-MAX)
-        (set! *df-safe-fall?* #t) ;; no fall damage until he next stands on something
+        (set! *fc-safe-fall?* #t) ;; no fall damage until he next stands on something
         ;; never treat flight as a fall, so landing is always safe
         (vector-copy! (-> self control last-trans-any-surf) (-> self control trans))
         (set! (-> self control mod-surface)
