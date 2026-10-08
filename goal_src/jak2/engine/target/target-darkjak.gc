@@ -2262,9 +2262,7 @@
   (set! (-> self node-list data 3 param0) dark-flight-main-joint)
   ;; the hunch while flying (as Jak 3's Dark Jak): chest bone, node 6 (*fc-hunching?* is kept in
   ;; dark-flight-guard, which runs every frame, so it eases back after landing)
-  (if *dark-wings-out?*
-      (set! (-> self node-list data 6 param0) fc-dark-chest-joint)
-      )
+  (fc-dark-hunch-hook)
   (cond
     ((= (-> self state name) 'target-darkjak-slam)
      ;; superhero landing: let its own dive/landing animation play (the tuck froze it)
