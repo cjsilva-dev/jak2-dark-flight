@@ -2145,14 +2145,12 @@
 ;; Tilt Jak's whole body forward while gliding (Superman), via a callback on his root bone "main"
 ;; (node 3, otherwise unused). It eases toward the target every frame, so it also straightens him
 ;; back up after landing. The wings ride his chest bone, so they tilt with him.
-(define *df-glide-pitch* 72.0) ;; degrees forward while gliding (flip the sign if he leans back)
-(define *df-launch-pitch* 45.0) ;; a launch out of a glide lifts his nose from the 72 glide tilt
 (define *df-body-pitch* 0.0)
 
 (defun dark-flight-main-joint ((node cspace) (tq transformq))
   (let ((want (cond
-                ((and *dark-wings-out?* *df-pose-launch?* *df-glide-pose-on?*) *df-launch-pitch*) ;; nose up
-                ((and *df-glide-pose-on?* *dark-wings-out?*) *df-glide-pitch*)
+                ((and *dark-wings-out?* *df-pose-launch?* *df-glide-pose-on?*) *fc-launch-pitch*) ;; nose up
+                ((and *df-glide-pose-on?* *dark-wings-out?*) *fc-dark-glide-pitch*)
                 (else 0.0)
                 )
               )
@@ -2230,6 +2228,7 @@
    pole flips, roll flips...), and folding in every one not listed broke flying after a ledge."
   ;; no fall damage between a flight and the next landing, even if the wings were folded mid-air
   (fc-safe-fall-tick) ;; no fall damage between a flight and the next landing (flight-core.gc)
+  (set! *fc-hunching?* *dark-wings-out?*) ;; Dark Jak hunches while he flies (flight-core.gc)
   (when (and (or *dark-wings-out?* *dark-wings-want?* *dark-flight-cam?*)
              (or (focus-test? self dead grabbed pilot board mech)
                  (not (focus-test? self dark))
@@ -2261,6 +2260,11 @@
   ;; re-attach every frame: the bone keeps whatever function object it was given, so after a
   ;; hot-reload it kept calling the OLD tilt code
   (set! (-> self node-list data 3 param0) dark-flight-main-joint)
+  ;; the hunch while flying (as Jak 3's Dark Jak): chest bone, node 6 (*fc-hunching?* is kept in
+  ;; dark-flight-guard, which runs every frame, so it eases back after landing)
+  (if *dark-wings-out?*
+      (set! (-> self node-list data 6 param0) fc-dark-chest-joint)
+      )
   (cond
     ((= (-> self state name) 'target-darkjak-slam)
      ;; superhero landing: let its own dive/landing animation play (the tuck froze it)
