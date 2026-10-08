@@ -2808,6 +2808,42 @@
           )
   )
 
+(defbehavior dw-wing-arc dark-wings ()
+  "Dark Jak's crackle across his wings (fc-wing-arc, flight-core.gc): a bolt between two wing bones on
+   the same side (Metal Kor's lfr/lback/rfr/rbackwing chains, or the pegasus's Lwing/Rwing chains)."
+  (let ((n 0)
+        (idx (new 'stack-no-clear 'array 'int32 48))
+        )
+    (dotimes (i (-> self node-list length))
+      (let ((jt (-> self node-list data i joint)))
+        (when (and jt (< n 48) (>= (string-position "wing" (the-as string (-> jt name))) 0))
+          (set! (-> idx n) i)
+          (+! n 1)
+          )
+        )
+      )
+    (when (< 1 n)
+      (let* ((j1 (-> idx (rand-vu-int-range 0 (+ n -1))))
+             (side (-> (the-as string (-> self node-list data j1 joint name)) data 0))
+             (j2 -1)
+             )
+        (dotimes (tries 8)
+          (let ((c (-> idx (rand-vu-int-range 0 (+ n -1)))))
+            (if (and (< j2 0) (!= c j1)
+                     (= (logior (-> (the-as string (-> self node-list data c joint name)) data 0) 32) (logior side 32)))
+                (set! j2 c)
+                )
+            )
+          )
+        (if (>= j2 0)
+            (fc-wing-arc (-> *lightning-spec-id-table* 6) j1 j2) ;; Jak II's Dark Jak body crackle
+            )
+        )
+      )
+    )
+  (none)
+  )
+
 (defstate idle (dark-wings)
   :virtual #t
   :code (behavior ()
@@ -2865,6 +2901,9 @@
           ((or *dark-wings-want?* (< 0.001 *dark-wings-grow*))
            (logclear! (-> self draw status) (draw-control-status no-draw no-draw-temp))
            (set! *dw-last-shown* (current-time))
+           (if (and *dark-wings-want?* (rand-vu-percent? *fc-wing-arc-chance*)) ;; crackle, as Jak 3's
+               (dw-wing-arc)
+               )
            )
           (else
             (logior! (-> self draw status) (draw-control-status no-draw))
