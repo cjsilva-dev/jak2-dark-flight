@@ -317,6 +317,7 @@
   "flight-stream-h.o"
   "flight-map.o"
   "flight-stream.o"
+  "flight-core.o"
   "target-darkjak.o"
   "target-death.o"
   "target-gun.o"
