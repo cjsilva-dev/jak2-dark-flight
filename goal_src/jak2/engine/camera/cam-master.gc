@@ -24,8 +24,8 @@
     )
   )
 
-;; DARK FLIGHT MOD: set every frame while Dark Jak's wings are out.
-(define *dark-flight-cam?* #f)
+;; FLIGHT MODS: Jak is flying (defined in flight-core.gc; set when a flight state begins, cleared when it ends).
+(define-extern *fc-cam?* symbol)
 
 (defbehavior reset-follow camera-master ()
   (let ((a0-1 (handle->process (-> self focus handle))))
@@ -205,11 +205,11 @@
           (let ((s5-7 (new-stack-vector0)))
             0.0
             (cond
-              ;; DARK FLIGHT MOD: while flying, track Jak like on the ground (as halfpipes do).
+              ;; FLIGHT MODS: while flying, track Jak like on the ground (as halfpipes do).
               ;; Air tracking barely rises and pitches up instead, so up high you looked up at him.
               ((and (focus-test? (the-as target gp-0) in-air)
                     (not (logtest? (focus-status halfpipe super) (-> (the-as target gp-0) focus-status)))
-                    (not *dark-flight-cam?*)
+                    (not *fc-cam?*)
                     )
                (if *display-cam-los-debug*
                    (format *stdcon* "air tracking~%")

@@ -63,6 +63,8 @@
   (-> *game-info* sub-task-list arg0 name)
   )
 
+(define-extern df-game-defaults (function none)) ;; DARK FLIGHT (target-darkjak.gc)
+
 (defun update-task-masks ((arg0 symbol))
   (if (= arg0 'none)
       (return 0)
@@ -78,6 +80,7 @@
       0
       )
     )
+  (df-game-defaults) ;; DARK FLIGHT: what the mod adds to a game's state, once, right here
   (let ((s5-0 (the-as connection-pers (-> *minimap* engine alive-list))))
     (while s5-0
       (let ((s4-0 (the-as connection-minimap s5-0)))

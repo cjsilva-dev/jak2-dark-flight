@@ -40,13 +40,15 @@ Both are in the *Secrets* menu, and each save keeps its own choice:
   with its sounds). Free, and always in the menu. Both styles crackle with Dark Jak's lightning, as his
   wings do in True Flight.
 - **Unlimited Dark Jak** — the game's own item (endless dark eco). The mod unlocks it and switches it **on**
-  in any save that doesn't have it yet; switch it off there if you'd rather collect dark eco (each
-  transformation then costs a full meter, as in the original game — the flight itself stays unlimited).
+  in any save that doesn't have it yet; switch it off there if you'd rather collect dark eco. Each
+  transformation then costs a full meter and runs out on the ground as in the original game, but
+  Dark Jak's timer pauses while he flies, so a flight is never cut short.
 
 ### What the mod writes into your save
 
 Secrets are saved with your game, so these stay in the save file (the original game ignores them if
-you load the save without the mod):
+you load the save without the mod). They are written in the one place the game itself decides what
+Jak has, when a game starts, a save loads or Jak respawns; nothing is written while you play:
 
 - **Unlimited Dark Jak** is marked bought and switched on the first time a save runs with the mod.
   Switch it off in the Secrets menu if you prefer; the mod won't switch it back on.
@@ -60,10 +62,14 @@ At the top of `goal_src/jak2/engine/target/target-darkjak.gc` (off by default):
   (so the force fields between districts open for a flying Jak)
 - `*df-opt-unlock-extras?*` — every Secrets-menu item and OpenGOAL PC cheat unlocked
 
+Both are applied with the rest of the mod's save defaults (`df-game-defaults`), once per new game, load
+or respawn.
+
 ## What this mod changes
 
 - `goal_src/jak2/engine/target/target-darkjak.gc` — the flight, glide, turbo, landing, wings and sounds
 - `goal_src/jak2/engine/target/{target,logic-target,target-h}.gc` — hooks the flight into Jak's air states
+- `goal_src/jak2/engine/game/task/task-control.gc` — calls the mod's save defaults where the game rebuilds what Jak has
 - `goal_src/jak2/engine/camera/cam-master.gc` — the camera tracks Jak's height while flying
 - `goal_src/jak2/engine/level/region.gc` — while flying in the city, district triggers are tested a little ahead of Jak (at most 30 m)
 - `goal_src/jak2/engine/target/flight-core.gc` — the flight both mods share: Dark Jak's flap, glide, turbo, dash and

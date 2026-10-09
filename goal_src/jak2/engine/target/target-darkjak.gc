@@ -102,7 +102,6 @@
 (define-extern df-sfx-bank (function none)) ;; DARK FLIGHT (defined with the flight code below)
 (define-extern dw-retire-folded-wings (function none))
 (define-extern dark-flight-guard (function none :behavior target))
-(define-extern *df-wings-style* symbol)
 
 ;; ---- DARK FLIGHT options (all off by default) ----
 ;; Dark Jak and all his powers from any save, plus every city security pass so the force fields
@@ -112,11 +111,52 @@
 ;; their menus).
 (define *df-opt-unlock-extras?* #f)
 
+(defun df-wings-style ()
+  "Which wings: the save's own Dark Angel Wings secret decides ('dark-angel), else 'metal-head.
+   The bit in the save is the only copy of this choice."
+  (if (logtest? (-> *game-info* secrets) (game-secrets dark-angel-wings)) 'dark-angel 'metal-head)
+  )
+
+(defun df-game-defaults ()
+  "What the mod adds to a game's state, applied ONCE from update-task-masks (task-control.gc): the
+   engine rebuilds the game's feature flags there on every new game, loaded save and respawn, after
+   a save has been restored, so this runs exactly where the game itself decides what Jak has."
+  ;; Dark Angel Wings is a Secrets-menu item; it comes bought (it's free) so it's always in the menu
+  (logior! (-> *game-info* purchase-secrets) (game-secrets dark-angel-wings))
+  ;; Fly as long as you like: the game's own Unlimited Dark Jak secret comes bought and switched ON
+  ;; in any save that never had it (new games included); after that it's the player's to switch off
+  ;; in the Secrets menu, and the save remembers. (Dark Jak's timer also pauses while he flies, see
+  ;; dark-flight-wings-out!, so the flight itself is unlimited either way.)
+  (when (not (logtest? (-> *game-info* purchase-secrets) (game-secrets endless-dark)))
+    (logior! (-> *game-info* purchase-secrets) (game-secrets endless-dark))
+    (logior! (-> *game-info* secrets) (game-secrets endless-dark))
+    )
+  (when *df-opt-all-dark-powers?*
+    (logior! (-> *game-info* features) (game-feature darkjak darkjak-bomb0 darkjak-bomb1 darkjak-invinc darkjak-giant))
+    (logior! (-> *game-info* features) (game-feature pass-red pass-green pass-yellow pass-blue))
+    )
+  (when *df-opt-unlock-extras?*
+    (logior! (-> *game-info* purchase-secrets)
+             (game-secrets toggle-beard hflip-screen endless-ammo invulnerable endless-dark scene-player-1
+                           scene-player-2 scene-player-3 level-select scrap-book-1 scrap-book-2 scrap-book-3
+                           gungame-blue gungame-dark reverse-races hero-mode big-head little-head
+                           )
+             )
+    ;; every OpenGOAL PC cheat unlocked (the game derives revealed/purchased from this)
+    (logior! (-> *pc-settings* cheats-unlocked)
+             (pc-cheats turbo-board health-bars vehicle-health-bars vehicle-invuln statistics suck-in-all
+                        music-player no-textures fast-movies slow-movies fast-speed slow-speed fast-travel
+                        orb-tracker real-time-of-day city-peace board-tricks weather-bad weather-good hijack-lines
+                        )
+             )
+    )
+  (none)
+  )
+
 (defbehavior target-darkjak-process target ()
   (local-vars (gp-0 vector))
-  ;; DARK FLIGHT: the wing style is a Secrets-menu item, "Dark Angel Wings" (off = Metal Head), so
-  ;; each save keeps its own. It comes bought (free) so it's always in the menu.
-  (logior! (-> *game-info* purchase-secrets) (game-secrets dark-angel-wings))
+  ;; DARK FLIGHT: what the mod adds to a save (the wing-style item, Unlimited Dark Jak, the test
+  ;; options) is applied once per new game / load / respawn by df-game-defaults, not here.
   ;; R3 as Dark Jak switches wings (R3 is first-person look, which the game turns off while Dark;
   ;; L3+R3 is left alone for the PC subtitle tool). Same bit as the Secrets item, so they agree.
   (when (and (focus-test? self dark)
@@ -126,40 +166,9 @@
              )
     (logxor! (-> self game secrets) (game-secrets dark-angel-wings))
     )
-  (set! *df-wings-style* (if (logtest? (-> self game secrets) (game-secrets dark-angel-wings)) 'dark-angel 'metal-head))
-  (df-sfx-bank) ;; the wing style's sounds, from the player's game files
+  (df-sfx-bank) ;; the wing style's sounds, from the player's game files (a 16-frame poll)
   (dark-flight-guard) ;; wings out but no longer flying (died, grabbed, hijacked a zoomer...): fold them
   (dw-retire-folded-wings) ;; free the wings' process slot once they're put away (the Titan suit needs it)
-  ;; DARK FLIGHT: fly as long as you like. The game's own Endless Dark Eco secret comes bought and
-  ;; switched ON in any save that doesn't have it yet (new games included); after that it's the
-  ;; player's to switch off in the Secrets menu, and the save remembers. Dark Jak never times out
-  ;; (darkjak-start-time is refreshed below), so without it each transform costs a full meter but
-  ;; the flight itself is unlimited.
-  (when (not (logtest? (-> *game-info* purchase-secrets) (game-secrets endless-dark)))
-    (logior! (-> *game-info* purchase-secrets) (game-secrets endless-dark))
-    (logior! (-> self game secrets) (game-secrets endless-dark))
-    )
-  (when *df-opt-all-dark-powers?*
-    (logior! (-> self game features) (game-feature darkjak darkjak-bomb0 darkjak-bomb1 darkjak-invinc darkjak-giant))
-    (logior! (-> self game features) (game-feature pass-red pass-green pass-yellow pass-blue))
-    )
-  (when *df-opt-unlock-extras?* ;; every frame, so loading a save can't take them away
-    (logior! (-> *game-info* purchase-secrets)
-             (game-secrets toggle-beard hflip-screen endless-ammo invulnerable endless-dark scene-player-1
-                           scene-player-2 scene-player-3 level-select scrap-book-1 scrap-book-2 scrap-book-3
-                           gungame-blue gungame-dark reverse-races hero-mode big-head little-head
-                           )
-             )
-    (logior! (-> *pc-settings* cheats-unlocked)
-             (pc-cheats turbo-board health-bars vehicle-health-bars vehicle-invuln statistics suck-in-all
-                        music-player no-textures fast-movies slow-movies fast-speed slow-speed fast-travel
-                        orb-tracker real-time-of-day city-peace board-tricks weather-bad weather-good hijack-lines
-                        )
-             )
-    )
-  (when (focus-test? self dark)
-    (set-time! (-> (the-as fact-info-target (-> self fact)) darkjak-start-time))
-    )
   (cond
     ((and (focus-test? self dark) (nonzero? (-> self darkjak)))
      (let ((a1-0 'eco-red))
@@ -180,6 +189,7 @@
                     )
                   (not (-> *setting-control* user-current darkjak))
                   )
+              (not *dark-wings-out?*) ;; DARK FLIGHT: never in flight (his timer is paused, dark-flight-wings-out!)
               (not (focus-test? self dead dangerous hit grabbed))
               (not (and (-> self next-state) (= (-> self next-state name) 'target-darkjak-get-off)))
               (not (logtest? (-> self darkjak stage) (darkjak-stage force-on)))
@@ -1947,7 +1957,7 @@
 (define *df-pose-rate*  45.0)  ;; aframes per second the pose can move
 (define *df-pose-cur*   12.0)
 (define *df-launch-until* (the-as time-frame 0))
-(define *df-pose-launch?* #f)                ;; set by dark-flight-pose while that's showing
+(define *df-pose-launch?* #f)                ;; set by dark-flight-main-joint (the launch tilt is showing)
 ;; Wings grow out of his back (with a little overshoot) and fold back in.
 (define *dark-wings-grow* 0.0)   ;; 0 folded .. 1 fully out
 (define *dw-last-shown* (the-as time-frame 0)) ;; last frame the wings were out or folding
@@ -1958,7 +1968,10 @@
 ;; Sounds: each wing style's own creature sounds (see df-sfx), from the player's game files.
 
 (define *df-sfx-vol* 1024) ;; volume for the flight sounds (1024 = full)
-(define *df-sfx-bank-frames* 0) ;; counts up; the bank is (re)requested every 300 frames
+(defconstant DF-SFX-POLL-MASK 15)  ;; df-sfx-bank looks every 16 frames (its counters count polls)
+(defconstant DF-SFX-REASK-POLLS 19) ;; ~5 s: the bank is (re)requested this often (a no-op if it's there)
+(defconstant DF-SFX-IDLE-POLLS 4)   ;; ~1 s of the loaders being idle before a request
+(define *df-sfx-bank-frames* 0) ;; polls since the last request
 
 (define *df-sfx-bank-loaded* (the-as symbol #f)) ;; the wing style whose bank was last requested
 (define *df-glide-sfx-last* (the-as time-frame 0)) ;; last frame spent gliding (a new glide plays the swoop)
@@ -1968,7 +1981,7 @@
    Haven Forest pegasus (WING_CYCLE / PEG_GLIDE, FOREST2.SBK), Metal Head is Metal Kor
    (NBOSS_WING_FLAP / NBOSS_HOVER, NEST6.SBK). They come from the player's own copy of the game, loaded by df-sfx-bank into the
    extra sound bank slot this mod's engine adds (stock Jak 2's level slots are always in use)."
-  (let ((peg? (= *df-wings-style* 'dark-angel)))
+  (let ((peg? (= (df-wings-style) 'dark-angel)))
     (sound-play-by-name
       (case role
         (('glide) (if peg? (static-sound-name "peg-glide") (static-sound-name "nboss-hover")))
@@ -1979,8 +1992,8 @@
   (none)
   )
 
-(define *df-sfx-idle-frames* 0)   ;; consecutive frames with no level/bank loading going on
-(define *df-sfx-was-held* #f)      ;; last frame, a level held our bank (so leaving that level unloads it)
+(define *df-sfx-idle-frames* 0)   ;; consecutive polls with no level/bank loading going on
+(define *df-sfx-was-held* #f)      ;; last poll, a level held our bank (so leaving that level unloads it)
 
 (defun df-sfx-bank ()
   "Keep the wing style's sound bank loaded in the extra slot. Loads are only ever requested when
@@ -1989,7 +2002,9 @@
    that has held for a second, so a request can't land in the middle of a level transition (the
    IOP hang). Requests are re-sent every ~5 s (a no-op if the bank is still there) and promptly
    after a level that held the same bank lets it go (leaving Haven Forest / the Nest unloads it by
-   name). There's no load confirmation from the IOP, so *df-sfx-bank-loaded* means 'requested'."
+   name). There's no load confirmation from the IOP, so *df-sfx-bank-loaded* means 'requested'.
+   Called every frame, looks every 16th (DF-SFX-POLL-MASK)."
+  (when (zero? (logand (-> *display* real-clock frame-counter) DF-SFX-POLL-MASK))
   (set! *df-sfx-bank-frames* (+ *df-sfx-bank-frames* 1))
   (set! *df-sfx-idle-frames*
         (if (and (zero? (rpc-busy? 1))
@@ -2002,7 +2017,7 @@
             0
             )
         )
-  (let ((want (if (= *df-wings-style* 'dark-angel) 'forest2 'nest6))
+  (let ((want (if (= (df-wings-style) 'dark-angel) 'forest2 'nest6))
         (held #f)
         )
     (dotimes (i 3)
@@ -2011,10 +2026,10 @@
           )
       )
     (if (and *df-sfx-was-held* (not held)) ;; the level copy just went away: ask again soon
-        (set! *df-sfx-bank-frames* 300)
+        (set! *df-sfx-bank-frames* DF-SFX-REASK-POLLS)
         )
     (set! *df-sfx-was-held* held)
-    (when (and (< 300 *df-sfx-bank-frames*) (< 60 *df-sfx-idle-frames*))
+    (when (and (< DF-SFX-REASK-POLLS *df-sfx-bank-frames*) (< DF-SFX-IDLE-POLLS *df-sfx-idle-frames*))
       (set! *df-sfx-bank-frames* 0)
       (cond
         ((and *df-sfx-bank-loaded* (!= *df-sfx-bank-loaded* want)) ;; style changed: free the old one
@@ -2029,7 +2044,7 @@
                )
            )
          (set! *df-sfx-bank-loaded* (the-as symbol #f))
-         (set! *df-sfx-bank-frames* 300) ;; load the new one on the next idle frame
+         (set! *df-sfx-bank-frames* DF-SFX-REASK-POLLS) ;; load the new one on the next idle poll
          )
         ((not held)
          (sound-bank-load (string->sound-name (symbol->string want))) ;; no-op if already loaded
@@ -2038,6 +2053,7 @@
         )
       )
     )
+  )
   (none)
   )
 
@@ -2148,6 +2164,9 @@
 (define *df-body-pitch* 0.0)
 
 (defun dark-flight-main-joint ((node cspace) (tq transformq))
+  "Dark Jak's body tilt in flight, on his main bone (node 3): the glide lean, the nose-up launch out
+   of a glide. Hooked on by dark-flight-wings-out!; takes itself off once upright with the wings away."
+  (set! *df-pose-launch?* (< (current-time) *df-launch-until*))
   (let ((want (cond
                 ((and *dark-wings-out?* *df-pose-launch?* *df-glide-pose-on?*) *fc-launch-pitch*) ;; nose up
                 ((and *df-glide-pose-on?* *dark-wings-out?*) *fc-dark-glide-pitch*)
@@ -2174,15 +2193,46 @@
   (none)
   )
 
+(define *df-dark-time-left* (the-as time-frame 0)) ;; of Dark Jak's timer, while the wings are out
+
+(defbehavior dark-flight-wings-out! target ()
+  "The wings come out (once per flight): Dark Jak's timer pauses (he flies as long as he likes), his
+   flying posture hooks onto his bones (a bone keeps a hook until the hook takes itself off), and he
+   hunches. Jak's bones are new after every respawn, so the hooks go on here, not at load."
+  (when (not *dark-wings-out?*)
+    (set! *dark-wings-out?* #t)
+    (let ((f (the-as fact-info-target (-> self fact))))
+      (set! *df-dark-time-left* (- (-> f darkjak-effect-time) (- (current-time) (-> f darkjak-start-time))))
+      )
+    (set! (-> self node-list data 3 param0) dark-flight-main-joint)
+    (set! *fc-hunching?* #t)
+    (fc-dark-hunch-hook)
+    )
+  (none)
+  )
+
+(defbehavior dark-flight-wings-in! target ()
+  "The wings go away: Dark Jak's timer resumes where it paused; the posture eases back and the
+   hooks take themselves off."
+  (when *dark-wings-out?*
+    (set! *dark-wings-out?* #f)
+    (let ((f (the-as fact-info-target (-> self fact))))
+      (set! (-> f darkjak-start-time) (- (current-time) (- (-> f darkjak-effect-time) *df-dark-time-left*)))
+      )
+    )
+  (set! *fc-hunching?* #f)
+  (none)
+  )
+
 (defbehavior dark-flight-fold target ()
   "Put the wings away and undo everything flight changed: gravity, glide, camera."
-  (set! *dark-wings-out?* #f)
+  (dark-flight-wings-in!)
   (dark-flight-glide-end)
   (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
   (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
   (dark-wings-show #f)
   (dark-flight-camera #f)
-  (set! *dark-flight-cam?* #f)
+  (set! *fc-cam?* #f)
   (none)
   )
 
@@ -2228,8 +2278,7 @@
    pole flips, roll flips...), and folding in every one not listed broke flying after a ledge."
   ;; no fall damage between a flight and the next landing, even if the wings were folded mid-air
   (fc-safe-fall-tick) ;; no fall damage between a flight and the next landing (flight-core.gc)
-  (set! *fc-hunching?* *dark-wings-out?*) ;; Dark Jak hunches while he flies (flight-core.gc)
-  (when (and (or *dark-wings-out?* *dark-wings-want?* *dark-flight-cam?*)
+  (when (and (or *dark-wings-out?* *dark-wings-want?* *fc-cam?*)
              (or (focus-test? self dead grabbed pilot board mech)
                  (not (focus-test? self dark))
                  (let ((nm (symbol->string (-> self state name))))
@@ -2256,19 +2305,14 @@
   )
 
 (defbehavior dark-flight-pose target ()
-  "Called from target-post while airborne and Dark: which pose Jak holds in flight."
-  ;; re-attach every frame: the bone keeps whatever function object it was given, so after a
-  ;; hot-reload it kept calling the OLD tilt code
-  (set! (-> self node-list data 3 param0) dark-flight-main-joint)
-  ;; the hunch while flying (as Jak 3's Dark Jak): chest bone, node 6 (*fc-hunching?* is kept in
-  ;; dark-flight-guard, which runs every frame, so it eases back after landing)
-  (fc-dark-hunch-hook)
+  "Called from target-post while airborne and Dark: which pose Jak holds in flight. (The tilt and
+   hunch hooks on his bones are put on by dark-flight-wings-out!; after a hot-reload the bones keep
+   the old code until the next takeoff.)"
   (cond
     ((= (-> self state name) 'target-darkjak-slam)
      ;; superhero landing: let its own dive/landing animation play (the tuck froze it)
      )
     ((begin
-       (set! *df-pose-launch?* (< (current-time) *df-launch-until*))
        (and *df-glide-pose-on?* *dark-wings-out?* (not *df-pose-launch?*))
        )
      (let ((a (-> self draw art-group data DF-GLIDE-POSE)))
@@ -2362,8 +2406,8 @@
       (the-as process #f)
       )
     (set! (-> self control bomb-scale) 0.0)
-    (set! *dark-flight-cam?* #f)
-    (set! *dark-wings-out?* #f)
+    (set! *fc-cam?* #f)
+    (dark-flight-wings-in!)
     (dark-wings-show #f)
     (dark-flight-camera #f)
     (target-exit)
@@ -2372,7 +2416,7 @@
     ;; the engine clamps falls to gravity-max (40 m/s); lift it or the plunge stays floaty
     (set! (-> self control dynam gravity-max) (+ (meters 10) *fc-slam-boost-max*))
     (vector-copy! (-> self control last-trans-any-surf) (-> self control trans)) ;; never fall damage
-    (set! *dark-flight-cam?* #t)
+    (set! *fc-cam?* #t)
     ;; the plunge is still flight: streaming, the game's current level and the abyss net keep running
     (fs-tick)
     )
@@ -2644,7 +2688,7 @@
        ;; Jak 3 parity: a flap within the cooldown of the last one is ignored (the press is still eaten)
        (when (fc-flap-ready? (not *dark-wings-out?*))
          (fc-flap-begin!)
-         (set! *dark-wings-out?* #t)
+         (dark-flight-wings-out!)
          (dark-flight-beat)
          (fc-flap-end!)
          )
@@ -2653,7 +2697,7 @@
      (fc-dark-flap-hold-tick)
      ;; holding L1 glides, and opens the wings if they aren't out yet
      (if (cpad-hold? (-> self control cpad number) l1)
-         (set! *dark-wings-out?* #t)
+         (dark-flight-wings-out!)
          )
      (cond
        (*dark-wings-out?*
@@ -2666,7 +2710,7 @@
         (set! (-> self control mod-surface) (fc-dark-fly-surface)) ;; R1 turbo only right after a flap
         (dark-wings-show #t)
         (dark-flight-camera #t)
-        (set! *dark-flight-cam?* #t)
+        (set! *fc-cam?* #t)
         (dark-flight-city)
         (dark-flight-dash) ;; R1 tap
         ;; flapping turbo: accelerate along Jak's facing, like the glide turbo
@@ -2685,14 +2729,14 @@
        (else
          (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
          (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
-         (set! *dark-flight-cam?* #f)
+         (set! *fc-cam?* #f)
          )
        )
      )
     (else
       ;; on the ground (or no longer Dark Jak): fold the wings away
-      (set! *dark-wings-out?* #f)
-      (set! *dark-flight-cam?* #f)
+      (dark-flight-wings-in!)
+      (set! *fc-cam?* #f)
       (dark-flight-glide-end)
       (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
       (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
@@ -2711,7 +2755,6 @@
 ;; ---- wing style (Secrets menu: "Dark Angel Wings", off = Metal Head) ----
 ;;   'metal-head -- Metal Kor's wings (default)
 ;;   'dark-angel -- the Haven Forest pegasus's bat wings
-(define *df-wings-style* 'metal-head)   ;; set from the save's secrets every frame
 (define *dw-spawned-style* 'metal-head) ;; the style the live wings were built with (the option can change)
 ;; Dark Angel: the pegasus is one whole-body model, so its body is shrunk away bone by bone and its
 ;; two wing chains are mounted on Jak's back.
@@ -3035,7 +3078,7 @@
   )
 
 (defbehavior dark-wings-init-side dark-wings ((side float))
-  (set! *dw-spawned-style* *df-wings-style*)
+  (set! *dw-spawned-style* (df-wings-style))
   (set! (-> self root) (new 'process 'trsqv))
   (set-vector! (-> self root scale) 0.15 0.15 0.15 1.0) ;; Metal Kor is dragon-sized
   (quaternion-identity! (-> self root quat))
@@ -3185,7 +3228,7 @@
   (set! *dw-killed-frame?* #f)
   (let ((w (the-as process-drawable (dw-live-wings))))
     (cond
-      ((and w (!= *dw-spawned-style* *df-wings-style*)) ;; the wing option changed: rebuild them
+      ((and w (!= *dw-spawned-style* (df-wings-style))) ;; the wing option changed: rebuild them
        (deactivate w)
        (set! *dark-wings-handle* (the-as handle #f))
        (set! *dw-killed-frame?* #t)
